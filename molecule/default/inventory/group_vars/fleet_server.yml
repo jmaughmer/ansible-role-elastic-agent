@@ -5,7 +5,7 @@
 elastic_fleet_version: "{{ test_default_version }}"
 elastic_fleet_public_urls: ["https://{{ test_fleet_address }}:8220"]
 elastic_fleet_elasticsearch_hosts: ["https://{{ test_es_address }}:9200"]
-elastic_fleet_service_token: "{{ lookup('ansible.builtin.file', test_secrets_dir ~ '/fleet_service_token') }}"
+elastic_fleet_service_token: "{{ lookup('ansible.builtin.file', test_secrets_dir ~ '/fleet_server_service_token') }}"
 elastic_fleet_kibana_url: "{{ test_kibana_url }}"
 elastic_fleet_kibana_username: "{{ test_admin_user }}"
 elastic_fleet_kibana_password: "{{ test_admin_password }}"
