@@ -1,0 +1,193 @@
+---
+# Each case is a play of its own (case.yml), with the settings under test as
+# play variables over the accepted ones in inventory/group_vars. test_case:
+#   name          what the case is
+#   task          regex for the task that has to fail; absent means the case
+#                 must pass
+#   expect        regex the failure message has to match
+#   token_source  for passing cases: where the token has to come from
+#   fleet_url     for passing cases: the Fleet URL the role has to use
+# The checks that handle secrets run under no_log, which only hides what is
+# printed: the failure case.yml records still has the message. Each one is
+# checked for the values in test_secrets.
+
+- name: Valid settings pass
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: valid settings pass, token published by elastic-fleet
+      token_source: fleet
+      fleet_url: https://fleet.example.test:8220
+
+- name: Explicit token
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: an explicit token wins over the published one
+      token_source: explicit
+    elastic_agent_enrollment_token: PREFLIGHT-SECRET-TOKEN
+
+- name: Fleet URL set explicitly
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: elastic_agent_fleet_url wins over the inventory
+      token_source: fleet
+      fleet_url: https://fleet-lb.example.test:8220
+    elastic_agent_fleet_url: 'https://fleet-lb.example.test:8220/'
+
+- name: Unsupported distribution
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: distribution not in elastic_agent_supported_distributions
+      task: Verify operating system is supported
+      expect: Unsupported platform Rocky
+    elastic_agent_supported_distributions: [RedHat, AlmaLinux]
+
+- name: Host in the Fleet Server group
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: host in the Fleet Server group
+      task: Verify host is not a Fleet Server
+      expect: is a Fleet Server
+    elastic_agent_fleet_group: elastic_agent
+
+- name: Version without a patch release
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: version without a patch release
+      task: Verify Elastic Agent version
+      expect: must be an exact 9\.x\.y release
+    elastic_agent_version: '9.5'
+
+- name: Another major version
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: another major version
+      task: Verify Elastic Agent version
+      expect: must be an exact 9\.x\.y release
+    elastic_agent_version: 8.19.0
+
+- name: Newer than Fleet Server
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: agent newer than Fleet Server
+      task: Verify Elastic Agent is not newer than Fleet Server
+      expect: is newer than Fleet Server 9\.5\.4
+    elastic_agent_version: 9.6.0
+
+- name: Unknown package source
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: unknown package source
+      task: Verify package source settings
+      expect: must be elastic, satellite or none
+    elastic_agent_repo_source: local
+
+- name: Satellite without a repository id
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: satellite without a repository id
+      task: Verify package source settings
+      expect: Satellite needs elastic_agent_satellite_repo_id
+    elastic_agent_repo_source: satellite
+
+- name: Satellite override of baseurl
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: satellite content override of baseurl
+      task: Verify package source settings
+      expect: cannot set enabled, baseurl or name
+    elastic_agent_repo_source: satellite
+    elastic_agent_satellite_repo_id: ACME_Elastic_Elastic_9_x
+    elastic_agent_satellite_repo_overrides: {baseurl: 'https://mirror.example.com/'}
+
+- name: Fleet URL over http
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: Fleet URL over http
+      task: Verify enrollment settings
+      expect: must be an https:// URL
+    elastic_agent_fleet_url: 'http://fleet.example.test:8220'
+
+- name: No Fleet Server known
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: no Fleet URL and no Fleet Server group
+      task: Verify enrollment settings
+      expect: put\s+the Fleet Servers in group 'nosuchgroup'
+    elastic_agent_fleet_group: nosuchgroup
+
+- name: Neither policy nor token
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: neither a policy nor a token
+      task: Verify enrollment settings
+      expect: elastic_agent_policy_id or\s+elastic_agent_enrollment_token is required
+    elastic_agent_policy_id: ''
+
+- name: Tag with a comma
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: tag with a comma
+      task: Verify enrollment settings
+      expect: tags without commas
+    elastic_agent_tags: ['a,b']
+
+- name: Extra arguments as a string
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: extra arguments as a string
+      task: Verify enrollment settings
+      expect: elastic_agent_enroll_extra_args a list
+    elastic_agent_enroll_extra_args: '--proxy-url=http://proxy:3128'
+
+- name: Unknown ready state
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: unknown ready state
+      task: Verify enrollment settings
+      expect: elastic_agent_ready_states a non-empty subset
+    elastic_agent_ready_states: [ONLINE]
+
+- name: Client certificate without an entry
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: client certificate without an ssl_certificates entry
+      task: Verify the client certificate
+      expect: needs the entry 'agent-p1'
+    elastic_agent_client_certificate: true
+
+- name: No token and no Kibana credentials
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: no token for the policy and no Kibana credentials
+      task: Verify a token can be looked up in Kibana
+      expect: needs an enrollment token for policy 'other-policy'
+    elastic_agent_policy_id: other-policy
+    elastic_agent_kibana_password: ''
+
+- name: Kibana over https without a CA
+  ansible.builtin.import_playbook: case.yml
+  vars:
+    test_case:
+      name: Kibana over https without a CA
+      task: Verify a token can be looked up in Kibana
+      expect: needs an enrollment token for policy 'other-policy'
+    elastic_agent_policy_id: other-policy

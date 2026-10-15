@@ -1,0 +1,7 @@
+---
+ansible_connection: local   # never used: nothing runs on this host
+elastic_fleet_version: "9.5.4"
+elastic_fleet_public_urls: ["https://fleet.example.test:8220"]
+# As ansible-role-elastic-fleet publishes it
+elastic_fleet_enrollment_tokens:
+  agent-policy: PREFLIGHT-SECRET-TOKEN

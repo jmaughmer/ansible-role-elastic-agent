@@ -1,0 +1,116 @@
+---
+- name: Preflight | Verify operating system is supported
+  ansible.builtin.assert:
+    that:
+      - elastic_agent_supported_distributions is sequence
+      - elastic_agent_supported_distributions is not string
+      - ansible_facts['os_family'] == 'RedHat'
+      - ansible_facts['distribution'] in elastic_agent_supported_distributions
+      - ansible_facts['distribution_major_version'] in ['9', '10']
+    fail_msg: >-
+      Unsupported platform {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }}. Supported: major version 9 or 10 of
+      {{ elastic_agent_supported_distributions | join(', ') }} (elastic_agent_supported_distributions).
+    quiet: true
+
+# A Fleet Server is already an Elastic Agent; enrolling it again as an ordinary
+# agent would take it out of service.
+- name: Preflight | Verify host is not a Fleet Server
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname not in (groups[elastic_agent_fleet_group] | default([]))
+      - not _ea_fleet_server_state.stat.exists
+    fail_msg: >-
+      {{ inventory_hostname }} is a Fleet Server (it is in group '{{ elastic_agent_fleet_group }}' or was
+      enrolled by ansible-role-elastic-fleet). A Fleet Server already runs Elastic Agent: add integrations
+      to its policy instead of applying this role to it.
+    quiet: true
+
+- name: Preflight | Verify Elastic Agent version
+  ansible.builtin.assert:
+    that:
+      - elastic_agent_version is match('^9[.][0-9]+[.][0-9]+$')
+      - _ea_installed_version == '' or _ea_installed_version is version(elastic_agent_version, '<=')
+      - _ea_installed_version == '' or _ea_installed_version.split('.')[0] == _ea_major_version
+    fail_msg: >-
+      elastic_agent_version must be an exact 9.x.y release; downgrades and major upgrades are not
+      supported (installed: '{{ _ea_installed_version }}', requested: '{{ elastic_agent_version }}').
+    quiet: true
+
+# Only when the inventory gives the Fleet Servers' version.
+- name: Preflight | Verify Elastic Agent is not newer than Fleet Server
+  ansible.builtin.assert:
+    that:
+      - >-
+        (elastic_agent_version.split('.')[0:2] | join('.'))
+        is version(_ea_fleet_version.split('.')[0:2] | join('.'), '<=')
+    fail_msg: >-
+      Elastic Agent {{ elastic_agent_version }} is newer than Fleet Server {{ _ea_fleet_version }}
+      (elastic_fleet_version of {{ _ea_fleet_first_host }}). Upgrade Fleet Server first.
+    quiet: true
+  when: _ea_fleet_version is match('^[0-9]+[.][0-9]+')
+
+- name: Preflight | Verify package source settings
+  ansible.builtin.assert:
+    that:
+      - elastic_agent_repo_source in ['elastic', 'satellite', 'none']
+      - elastic_agent_repo_source != 'satellite' or elastic_agent_satellite_repo_id | length > 0
+      - elastic_agent_satellite_repo_state in ['unmanaged', 'enabled', 'disabled']
+      - elastic_agent_satellite_repo_overrides is mapping
+      - elastic_agent_satellite_repo_overrides.keys() | map('lower') | intersect(['enabled', 'baseurl', 'name']) | length == 0
+    fail_msg: >-
+      elastic_agent_repo_source must be elastic, satellite or none. Satellite needs
+      elastic_agent_satellite_repo_id; elastic_agent_satellite_repo_state must be unmanaged, enabled or
+      disabled; and elastic_agent_satellite_repo_overrides cannot set enabled, baseurl or name.
+    quiet: true
+
+- name: Preflight | Verify enrollment settings
+  ansible.builtin.assert:
+    that:
+      - elastic_agent_fleet_url is match('^https://[^/]+')
+      - elastic_agent_policy_id | length > 0 or elastic_agent_enrollment_token | length > 0
+      - elastic_agent_tags is sequence and elastic_agent_tags is not string
+      - elastic_agent_tags | select('search', '[,\s]') | list | length == 0
+      - elastic_agent_enroll_extra_args is sequence and elastic_agent_enroll_extra_args is not string
+      - elastic_agent_ready_states is sequence and elastic_agent_ready_states is not string
+      - elastic_agent_ready_states | length > 0
+      - elastic_agent_ready_states | difference(_ea_state_names) | length == 0
+    fail_msg: >-
+      elastic_agent_fleet_url must be an https:// URL (found '{{ elastic_agent_fleet_url }}'; set it, or put
+      the Fleet Servers in group '{{ elastic_agent_fleet_group }}'), elastic_agent_policy_id or
+      elastic_agent_enrollment_token is required, elastic_agent_tags must be a list of tags without commas
+      or spaces, elastic_agent_enroll_extra_args a list, and elastic_agent_ready_states a non-empty subset of
+      {{ _ea_state_names | join(', ') }}.
+    quiet: true
+  no_log: "{{ elastic_agent_no_log }}"
+
+- name: Preflight | Verify the client certificate
+  ansible.builtin.assert:
+    that:
+      - _ea_ssl_entry.certificate.content is defined or _ea_ssl_entry.certificate.path is defined
+      - _ea_ssl_entry.key.content is defined or _ea_ssl_entry.key.path is defined
+    fail_msg: >-
+      elastic_agent_client_certificate needs the entry '{{ elastic_agent_ssl_certificate_name }}' in
+      ssl_certificates or elastic_tls_ssl_certificates with a certificate and a key (content, or a path
+      on the host).
+    quiet: true
+  when: elastic_agent_client_certificate | bool
+  no_log: "{{ elastic_agent_no_log }}"
+
+# The traditional encrypted PEM format derives its key with MD5, which a host
+# running in FIPS mode cannot use.
+- name: Preflight | Verify the private key can be read in FIPS mode
+  ansible.builtin.assert:
+    that:
+      - >-
+        _ea_ssl_entry.key.content is not defined
+        or _ea_ssl_entry.key.content is not search('Proc-Type: 4,ENCRYPTED')
+    fail_msg: >-
+      The private key for '{{ elastic_agent_ssl_certificate_name }}' is in the traditional encrypted PEM
+      format (Proc-Type: 4,ENCRYPTED), whose key derivation uses MD5, and this host runs in FIPS
+      mode. Convert it first: openssl pkcs8 -topk8 -in old.key -out new.key
+    quiet: true
+  when:
+    - elastic_agent_client_certificate | bool
+    - ansible_facts['fips'] | default(false) | bool
+  no_log: "{{ elastic_agent_no_log }}"

@@ -1,0 +1,37 @@
+---
+# Waits until `elastic-agent status` reports the agent connected to Fleet and
+# in one of elastic_agent_ready_states. Depending on the release, states are
+# reported as numbers or as names; both are understood.
+- name: Ready | Wait for Elastic Agent
+  block:
+    - name: Ready | Wait for Elastic Agent to connect to Fleet
+      vars:
+        # status exits non-zero while the daemon is not up; its output is JSON otherwise
+        _ea_status_json: "{{ (_ea_status.stdout | from_json) if (_ea_status.stdout | default('') | trim) is match('^[{]') else {} }}"
+        _ea_fleet_state_raw: "{{ _ea_status_json.FleetState | default(_ea_status_json.fleet_state | default('')) | string }}"
+        _ea_agent_state_raw: "{{ _ea_status_json.state | default('') | string }}"
+        _ea_fleet_state: >-
+          {{ (_ea_state_names[_ea_fleet_state_raw | int] | default('')) if _ea_fleet_state_raw is match('^[0-9]+$')
+             else _ea_fleet_state_raw | upper }}
+        _ea_agent_state: >-
+          {{ (_ea_state_names[_ea_agent_state_raw | int] | default('')) if _ea_agent_state_raw is match('^[0-9]+$')
+             else _ea_agent_state_raw | upper }}
+      ansible.builtin.command:
+        argv: [/usr/bin/elastic-agent, status, --output, json]
+      register: _ea_status
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      until: >-
+        _ea_fleet_state == 'HEALTHY'
+        and _ea_agent_state in elastic_agent_ready_states
+      retries: "{{ elastic_agent_ready_retries }}"
+      delay: "{{ elastic_agent_ready_delay }}"
+
+  rescue:
+    - name: Ready | Report an agent that did not become ready
+      ansible.builtin.fail:
+        msg: >-
+          Elastic Agent on {{ inventory_hostname }} did not connect to Fleet at {{ _ea_fleet_url }} and reach
+          {{ elastic_agent_ready_states | join(' or ') }} in time. Last status: {{ _ea_status.stdout | default('') }}
+          {{ _ea_status.stderr | default('') }}. Check `elastic-agent status` and `journalctl -u elastic-agent`.

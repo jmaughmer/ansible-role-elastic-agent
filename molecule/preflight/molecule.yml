@@ -1,0 +1,44 @@
+---
+# Preflight only: each case in converge.yml runs the role's facts, preflight
+# and token-selection tasks with settings that must be refused, and checks the
+# run fails in the right task, with the right message, and without printing a
+# secret. Nothing is installed, so there is no prepare, idempotence or verify
+# step.
+#   molecule test -s preflight
+#
+# One container is enough. The inventory adds a Fleet Server that is never
+# contacted (fleet-ghost), whose inventory variables the role reads.
+role_name_check: 1
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: ${MOLECULE_SCENARIO_DIRECTORY}/../default/requirements.yml
+
+driver:
+  name: podman
+
+platforms:
+  - name: agent-p1
+    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+    pre_build_image: true
+    override_command: false
+    systemd: always
+    groups: [elastic_agent]
+
+provisioner:
+  name: ansible
+  inventory:
+    links:
+      hosts: inventory/hosts.yml   # fleet-ghost
+      group_vars: inventory/group_vars/
+      host_vars: inventory/host_vars/
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - syntax
+    - create
+    - converge
+    - destroy

@@ -1,0 +1,33 @@
+---
+# The address-based defaults need every host's facts. Then, as
+# examples/playbook.yml: ansible-role-elastic-tls and this role in one play on
+# the agents. The role is included by the repository's path, which works
+# whatever the roles path is.
+- name: Gather facts from every host
+  hosts: all
+  gather_facts: true
+  tasks: []
+
+# Stands in for ansible-role-elastic-fleet, which publishes one enrollment
+# token per agent policy on the Fleet Server hosts when it runs earlier in the
+# same run. agent-2 takes its token from here.
+- name: Publish an enrollment token the way ansible-role-elastic-fleet does
+  hosts: fleet_server
+  gather_facts: false
+  tasks:
+    - name: Publish elastic_fleet_enrollment_tokens
+      ansible.builtin.set_fact:
+        elastic_fleet_enrollment_tokens:
+          molecule-b: "{{ lookup('ansible.builtin.file', test_secrets_dir ~ '/molecule_b_enrollment_token') }}"
+
+- name: Converge
+  hosts: elastic_agent
+  gather_facts: false
+  tasks:
+    - name: Issue the certificates
+      ansible.builtin.include_role:
+        name: elastic_tls
+
+    - name: Apply the role
+      ansible.builtin.include_role:
+        name: "{{ test_role_dir }}"

@@ -1,0 +1,18 @@
+---
+# ansible-role-elastic-fleet, applied by prepare.yml. The agent role reads
+# elastic_fleet_version from here through hostvars, as it would from a real
+# inventory.
+elastic_fleet_version: "{{ test_default_version }}"
+elastic_fleet_public_urls: ["https://{{ test_fleet_address }}:8220"]
+elastic_fleet_elasticsearch_hosts: ["https://{{ test_es_address }}:9200"]
+elastic_fleet_service_token: "{{ lookup('ansible.builtin.file', test_secrets_dir ~ '/fleet_server_service_token') }}"
+elastic_fleet_kibana_url: "{{ test_kibana_url }}"
+elastic_fleet_kibana_username: "{{ test_admin_user }}"
+elastic_fleet_kibana_password: "{{ test_admin_password }}"
+# Agents send their monitoring data to the test cluster, with the test CA.
+elastic_fleet_manage_output: true
+# agent-1 presents a client certificate; agent-2 does not.
+elastic_fleet_client_auth: optional
+elastic_fleet_no_log: false
+elastic_fleet_task_retries: 2
+elastic_fleet_task_delay: 5

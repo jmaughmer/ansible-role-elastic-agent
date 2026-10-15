@@ -1,0 +1,119 @@
+---
+# Only hosts that are about to enroll need a token. It comes from, in order:
+# elastic_agent_enrollment_token, the tokens ansible-role-elastic-fleet
+# published on the Fleet Server hosts in this run, or Kibana's Fleet API.
+- name: Token | Choose where the enrollment token comes from
+  vars:
+    _ea_published_tokens: "{{ _ea_fleet_first_hostvars.elastic_fleet_enrollment_tokens | default({}, true) }}"
+  ansible.builtin.set_fact:
+    _ea_token_source: >-
+      {{ 'none' if not (_ea_needs_enroll | bool)
+         else 'explicit' if (elastic_agent_enrollment_token | length) > 0
+         else 'fleet' if (_ea_published_tokens[elastic_agent_policy_id] | default('') | length) > 0
+         else 'kibana' }}
+  no_log: "{{ elastic_agent_no_log }}"
+
+- name: Token | Verify a token can be looked up in Kibana
+  ansible.builtin.assert:
+    that:
+      - elastic_agent_policy_id | length > 0
+      - elastic_agent_kibana_url is match('^https?://[^/]+')
+      - _ea_kibana_has_credentials | bool
+      - (_ea_has_kibana_ca | bool) or elastic_agent_kibana_url is match('^http://')
+    fail_msg: >-
+      {{ inventory_hostname }} needs an enrollment token for policy '{{ elastic_agent_policy_id }}'. Set
+      elastic_agent_enrollment_token, run ansible-role-elastic-fleet (which publishes one per policy in
+      elastic_fleet_agent_policies) earlier in the same run, or give the role elastic_agent_kibana_url,
+      credentials (elastic_agent_kibana_api_key, or elastic_agent_kibana_username and
+      elastic_agent_kibana_password) and, over https, a CA to look it up with.
+    quiet: true
+  when: _ea_token_source == 'kibana'
+  no_log: "{{ elastic_agent_no_log }}"
+
+# Once for the play, from the first host, for every policy a host needs.
+- name: Token | Look up enrollment tokens in Kibana
+  vars:
+    _ea_kibana_policies: >-
+      {{ ansible_play_hosts | map('extract', hostvars)
+         | selectattr('_ea_token_source', 'defined') | selectattr('_ea_token_source', 'equalto', 'kibana')
+         | map(attribute='elastic_agent_policy_id') | unique | list }}
+  run_once: true
+  when: _ea_kibana_policies | length > 0
+  module_defaults:
+    ansible.builtin.uri:
+      headers: "{{ _ea_kibana_headers }}"
+      url_username: "{{ elastic_agent_kibana_username if _ea_kibana_basic_auth | bool else omit }}"
+      url_password: "{{ elastic_agent_kibana_password if _ea_kibana_basic_auth | bool else omit }}"
+      force_basic_auth: "{{ _ea_kibana_basic_auth | bool }}"
+      ca_path: "{{ _ea_kibana_ca_file if _ea_has_kibana_ca | bool else omit }}"
+      validate_certs: true
+      timeout: "{{ elastic_agent_api_timeout }}"
+  block:
+    - name: Token | Look up the agent policies
+      ansible.builtin.uri:
+        url: "{{ _ea_kibana_url }}/api/fleet/agent_policies/{{ item | urlencode }}"
+        status_code: [200, 404]
+      loop: "{{ _ea_kibana_policies }}"
+      register: _ea_kibana_policy
+      until: _ea_kibana_policy.status | default(-1) in [200, 404]
+      retries: "{{ elastic_agent_task_retries }}"
+      delay: "{{ elastic_agent_task_delay }}"
+      no_log: "{{ elastic_agent_no_log }}"
+
+    - name: Token | Verify the agent policies exist
+      ansible.builtin.assert:
+        that:
+          - _ea_missing_policies | length == 0
+        fail_msg: >-
+          Agent policies {{ _ea_missing_policies | join(', ') }} do not exist in Fleet. Create them, for
+          example with ansible-role-elastic-fleet's elastic_fleet_agent_policies, or fix elastic_agent_policy_id.
+        quiet: true
+      vars:
+        _ea_missing_policies: >-
+          {{ _ea_kibana_policy.results | selectattr('status', 'equalto', 404) | map(attribute='item') | list }}
+
+    - name: Token | Read the enrollment tokens of the agent policies
+      ansible.builtin.uri:
+        url: >-
+          {{ _ea_kibana_url }}/api/fleet/enrollment_api_keys?perPage=100&kuery={{
+             ('policy_id:"' ~ item ~ '"') | urlencode }}
+        status_code: [200]
+      loop: "{{ _ea_kibana_policies }}"
+      register: _ea_kibana_keys
+      until: _ea_kibana_keys is not failed
+      retries: "{{ elastic_agent_task_retries }}"
+      delay: "{{ elastic_agent_task_delay }}"
+      no_log: "{{ elastic_agent_no_log }}"
+
+    # The first active token of each policy, newest first as Fleet lists them.
+    - name: Token | Record the enrollment tokens
+      ansible.builtin.set_fact:
+        _ea_kibana_tokens: >-
+          {%- set ns = namespace(out={}) -%}
+          {%- for r in _ea_kibana_keys.results -%}
+          {%-   set keys = (r.json['items'] | default([])) | selectattr('policy_id', 'equalto', r.item)
+                           | selectattr('active') | map(attribute='api_key') | list -%}
+          {%-   if keys | length > 0 -%}{%- set ns.out = ns.out | combine({r.item: keys | first}) -%}{%- endif -%}
+          {%- endfor -%}
+          {{ ns.out }}
+      no_log: "{{ elastic_agent_no_log }}"
+
+    - name: Token | Verify every agent policy has an active enrollment token
+      ansible.builtin.assert:
+        that:
+          - _ea_kibana_policies | difference(_ea_kibana_tokens.keys() | list) | length == 0
+        fail_msg: >-
+          Agent policies {{ _ea_kibana_policies | difference(_ea_kibana_tokens.keys() | list) | join(', ') }} have
+          no active enrollment token. Create one in Fleet (Enrollment tokens) or set elastic_agent_enrollment_token.
+        quiet: true
+
+- name: Token | Set the enrollment token
+  vars:
+    _ea_published_tokens: "{{ _ea_fleet_first_hostvars.elastic_fleet_enrollment_tokens | default({}, true) }}"
+  ansible.builtin.set_fact:
+    _ea_enrollment_token: >-
+      {{ elastic_agent_enrollment_token if _ea_token_source == 'explicit'
+         else _ea_published_tokens[elastic_agent_policy_id] if _ea_token_source == 'fleet'
+         else _ea_kibana_tokens[elastic_agent_policy_id] if _ea_token_source == 'kibana'
+         else '' }}
+  no_log: "{{ elastic_agent_no_log }}"

@@ -1,0 +1,10 @@
+---
+# The role reuses ansible-role-elastic-fleet's repository and package tasks,
+# so that role has to be installed too, as elastic_fleet
+# (elastic_agent_fleet_role). Install with:
+#   ansible-galaxy install -r requirements.yml
+roles:
+  - name: elastic_fleet
+    src: https://github.com/jmaughmer/ansible-role-elastic-fleet.git
+    scm: git
+    version: main

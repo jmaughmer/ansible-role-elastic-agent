@@ -1,0 +1,52 @@
+---
+# Changes that need a new enrollment, on agent-2 only:
+#   - an explicit elastic_agent_enrollment_token, and new tags. The token alone
+#     would not re-enroll; the tags do.
+# The agent must come back under a new id, with the new tags, while agent-1 is
+# left alone.
+- name: Gather facts from every host
+  hosts: all
+  gather_facts: true
+  tasks: []
+
+- name: Record the agents' ids
+  hosts: elastic_agent
+  gather_facts: false
+  tasks:
+    - name: Read the agent id
+      ansible.builtin.command: /usr/bin/elastic-agent status --output json
+      register: test_status_before
+      changed_when: false
+
+- name: Re-enroll agent-2 with an explicit token and new tags
+  hosts: agent-2
+  gather_facts: false
+  vars:
+    elastic_agent_enrollment_token: "{{ lookup('ansible.builtin.file', test_secrets_dir ~ '/molecule_b_enrollment_token') }}"
+    elastic_agent_tags: [molecule, re-enrolled]
+  tasks:
+    - name: Issue the certificates
+      ansible.builtin.include_role:
+        name: elastic_tls
+
+    - name: Apply the role
+      ansible.builtin.include_role:
+        name: "{{ test_role_dir }}"
+
+- name: Check which agents were re-enrolled
+  hosts: elastic_agent
+  gather_facts: false
+  tasks:
+    - name: Read the agent id again
+      ansible.builtin.command: /usr/bin/elastic-agent status --output json
+      register: test_status_after
+      changed_when: false
+
+    - name: Check only agent-2 has a new id
+      vars:
+        test_before: "{{ (test_status_before.stdout | from_json).info.id }}"
+        test_after: "{{ (test_status_after.stdout | from_json).info.id }}"
+      ansible.builtin.assert:
+        that:
+          - (test_before != test_after) == (inventory_hostname == 'agent-2')
+        fail_msg: "{{ inventory_hostname }}: agent id {{ test_before }} -> {{ test_after }}"

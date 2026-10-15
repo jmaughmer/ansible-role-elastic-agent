@@ -1,0 +1,37 @@
+---
+# From each host about to enroll, through the CA it will use: Fleet Server has
+# to answer on elastic_agent_fleet_url with a certificate that names that host
+# and chains to the CA, and report itself healthy. A failure here is the same
+# failure enroll would have, with a clearer message.
+- name: Fleet | Check Fleet Server is reachable and trusted
+  ansible.builtin.uri:
+    url: "{{ _ea_fleet_status_url }}"
+    ca_path: "{{ _ea_fleet_ca_file if _ea_has_fleet_ca | bool else omit }}"
+    validate_certs: true
+    timeout: "{{ elastic_agent_api_timeout }}"
+    status_code: [200]
+  register: _ea_fleet_status
+  # retry only while Fleet Server could not be reached or is starting
+  until: >-
+    _ea_fleet_status.status | default(-1) == 200
+    or (_ea_fleet_status.msg | default('')) is search('CERTIFICATE_VERIFY_FAILED|certificate verify failed|hostname')
+  retries: "{{ elastic_agent_task_retries }}"
+  delay: "{{ elastic_agent_task_delay }}"
+  failed_when: false
+  when: _ea_needs_enroll | bool
+
+- name: Fleet | Verify Fleet Server answered
+  ansible.builtin.assert:
+    that:
+      - _ea_fleet_status.status | default(-1) == 200
+      - (_ea_fleet_status.json.status | default('')) == 'HEALTHY'
+    fail_msg: >-
+      Fleet Server at {{ _ea_fleet_url }} {{ ('is not healthy (' ~ (_ea_fleet_status.json.status | default('?')) ~ ')')
+      if _ea_fleet_status.status | default(-1) == 200 else ('could not be reached from ' ~ inventory_hostname
+      ~ ': ' ~ (_ea_fleet_status.msg | default(''))) }}.
+      {% if _ea_has_fleet_ca | bool %}It is checked with the CA in {{ _ea_fleet_ca_file }}; its certificate must chain
+      to that CA and name {{ _ea_fleet_url | urlsplit('hostname') }}.{% else %}No CA is configured, so its
+      certificate must be trusted by the system trust store.{% endif %}
+      Set elastic_agent_fleet_check: false to skip this check.
+    quiet: true
+  when: _ea_needs_enroll | bool

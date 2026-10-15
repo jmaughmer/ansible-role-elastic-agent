@@ -1,0 +1,19 @@
+---
+roles:
+  # The role's package tasks come from here (elastic_agent_fleet_role), and
+  # prepare.yml deploys Fleet Server with it.
+  - name: elastic_fleet
+    src: https://github.com/jmaughmer/ansible-role-elastic-fleet.git
+    scm: git
+    version: main
+  # Certificates for every host.
+  - name: elastic_tls
+    src: https://github.com/jmaughmer/ansible-role-elastic-tls.git
+    scm: git
+    version: main
+
+collections:
+  - name: ansible.posix       # ansible-role-elastic-fleet's firewalld tasks
+  - name: community.crypto    # ansible-role-elastic-tls
+  - name: containers.podman   # Molecule's podman driver
+  - name: community.docker    # Molecule's docker driver (docker scenario)

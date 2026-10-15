@@ -1,0 +1,75 @@
+---
+- name: Service | Enable Elastic Agent service
+  ansible.builtin.systemd_service:
+    name: elastic-agent
+    enabled: true
+
+# --force replaces an existing enrollment without prompting; enroll restarts a
+# running agent itself. A re-enrolled agent gets a new id in Fleet; the old one
+# shows as offline until it is removed. The token is added to the arguments
+# here only, under no_log: enroll has no other way to take it.
+- name: Service | Enroll in Fleet
+  when: _ea_needs_enroll | bool
+  block:
+    - name: Service | Enroll Elastic Agent
+      ansible.builtin.command:
+        argv: "{{ _ea_enroll_argv[:3] + ['--enrollment-token=' ~ _ea_enrollment_token] + _ea_enroll_argv[3:] }}"
+      # Keep it running on the host if the SSH session drops meanwhile.
+      async: "{{ 0 if ansible_check_mode else (elastic_agent_enroll_timeout | int) }}"
+      poll: 5
+      register: _ea_enroll
+      changed_when: true
+      no_log: "{{ elastic_agent_no_log }}"
+
+    - name: Service | Record the enrollment
+      ansible.builtin.copy:
+        content: "{{ _ea_state_desired | to_nice_json }}"
+        dest: "{{ _ea_state_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+  rescue:
+    - name: Service | Report a failed enrollment
+      ansible.builtin.fail:
+        msg: >-
+          elastic-agent enroll failed on {{ inventory_hostname }} ({{ _ea_fleet_url }}, policy
+          '{{ elastic_agent_policy_id }}'): {{ (_ea_enroll.stderr | default('') | trim) or (_ea_enroll.msg | default('')) }}
+          Check that the enrollment token is active and belongs to that policy, and see
+          `journalctl -u elastic-agent` on the host.
+
+- name: Service | Start Elastic Agent
+  ansible.builtin.systemd_service:
+    name: elastic-agent
+    state: started
+  register: _ea_service_started
+
+# Upgrades and certificate changes need a restart; enroll already restarted
+# an agent it re-enrolled.
+- name: Service | Restart Elastic Agent
+  ansible.builtin.systemd_service:
+    name: elastic-agent
+    state: restarted
+    daemon_reload: true
+  register: _ea_service_restarted
+  when:
+    - _ea_service_started is not changed
+    - not (_ea_needs_enroll | bool)
+    - (elastic_agent_force_restart | bool) or ((_ea_restart_required | bool) and (elastic_agent_restart_on_change | bool))
+
+- name: Service | Report a restart that was skipped
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} has changes that need a restart (an upgrade or new certificates), but
+      elastic_agent_restart_on_change is false. Restart elastic-agent manually or re-run with
+      -e elastic_agent_force_restart=true.
+  when:
+    - _ea_restart_required | bool
+    - not (elastic_agent_restart_on_change | bool)
+    - not (_ea_needs_enroll | bool)
+    - _ea_service_started is not changed
+
+- name: Service | Wait for Elastic Agent
+  ansible.builtin.include_tasks: wait_ready.yml
+  when: >-
+    (_ea_needs_enroll | bool) or _ea_service_started is changed or _ea_service_restarted is changed

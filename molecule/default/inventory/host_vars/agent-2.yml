@@ -1,0 +1,6 @@
+---
+# Token from elastic_fleet_enrollment_tokens on the Fleet Server, as
+# ansible-role-elastic-fleet publishes it (converge.yml stands in for it). No
+# certificate of its own: only the CA, from elastic_tls_ca_certificate.
+elastic_agent_policy_id: molecule-b
+elastic_tls_certificates: []

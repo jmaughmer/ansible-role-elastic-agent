@@ -1,0 +1,4 @@
+---
+# A host in another agent policy, with its own tags.
+elastic_agent_policy_id: database-servers
+elastic_agent_tags: [linux, database]

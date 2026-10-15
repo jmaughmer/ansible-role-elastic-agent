@@ -1,0 +1,133 @@
+---
+- name: Gather facts from every host
+  hosts: all
+  gather_facts: true
+  tasks: []
+
+- name: Verify the agents
+  hosts: elastic_agent
+  gather_facts: false
+  vars:
+    test_mtls: "{{ elastic_agent_client_certificate | default(false) | bool }}"
+  tasks:
+    - name: Read the service state
+      ansible.builtin.service_facts:
+
+    - name: Check Elastic Agent is running and enabled
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['elastic-agent.service'].state == 'running'
+          - ansible_facts.services['elastic-agent.service'].status == 'enabled'
+
+    - name: Read the installed version
+      ansible.builtin.command: rpm -q --queryformat '%{VERSION}' elastic-agent  # noqa: command-instead-of-module - reads one package's version
+      register: test_rpm
+      changed_when: false
+
+    - name: Check the installed version is the role's default
+      ansible.builtin.assert:
+        that:
+          - test_rpm.stdout == test_default_version
+        fail_msg: "Elastic Agent {{ test_rpm.stdout }} is installed, expected {{ test_default_version }}"
+
+    # The repository file is ansible-role-elastic-fleet's, written disabled.
+    - name: Read the repository definition
+      ansible.builtin.slurp:
+        src: /etc/yum.repos.d/elastic-agent.repo
+      register: test_repo
+
+    - name: Check the repository is the shared, disabled one
+      ansible.builtin.assert:
+        that:
+          - test_repo.content | b64decode is search('\[elastic-agent-9\.x\]')
+          - test_repo.content | b64decode is search('enabled = 0')
+
+    - name: Check ownership and permissions
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      register: test_stat
+      failed_when: >-
+        test_stat.stat.exists != item.exists | default(true)
+        or (test_stat.stat.exists and (test_stat.stat.mode != item.mode or test_stat.stat.pw_name != 'root'))
+      loop:
+        - {path: /etc/elastic-agent/certs, mode: "0700"}
+        - {path: /etc/elastic-agent/certs/fleet-ca.crt, mode: "0644"}
+        - {path: /etc/elastic-agent/certs/kibana-ca.crt, mode: "0644"}
+        - {path: /etc/elastic-agent/certs/agent.crt, mode: "0644", exists: "{{ test_mtls }}"}
+        - {path: /etc/elastic-agent/certs/agent.key, mode: "0600", exists: "{{ test_mtls }}"}
+        - {path: /etc/elastic-agent/certs/agent.key.passphrase, exists: false}
+        - {path: /etc/elastic-agent/.ansible-agent-state.json, mode: "0600"}
+        - {path: /etc/elastic-agent/.ansible-fleet-server-state.json, exists: false}
+      loop_control:
+        label: "{{ item.path }}"
+
+    # agent-1's comes from its elastic_tls entry, agent-2's from
+    # elastic_tls_ca_certificate; both are the test CA.
+    - name: Read the installed Fleet Server CA and the elastic_tls CA
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop: [/etc/elastic-agent/certs/fleet-ca.crt, /etc/pki/elastic-tls/certs/ca.crt]
+      register: test_cas
+
+    - name: Check the Fleet Server CA is the elastic_tls CA
+      ansible.builtin.assert:
+        that:
+          - (test_cas.results[0].content | b64decode | trim) == (test_cas.results[1].content | b64decode | trim)
+
+    - name: Read the agent status
+      ansible.builtin.command: /usr/bin/elastic-agent status --output json
+      register: test_status
+      changed_when: false
+
+    - name: Check the agent is connected to Fleet
+      vars:
+        test_json: "{{ test_status.stdout | from_json }}"
+      ansible.builtin.assert:
+        that:
+          - (test_json.FleetState | default(test_json.fleet_state)) in [2, 'HEALTHY']
+          - test_json.state in [2, 'HEALTHY']
+        fail_msg: "{{ test_status.stdout }}"
+
+- name: Verify the agents in Fleet
+  hosts: kibana
+  gather_facts: false
+  vars:
+    test_expected:
+      agent-1: {policy: molecule-a, tags: [molecule, mtls]}
+      agent-2: {policy: molecule-b, tags: [molecule, re-enrolled]}   # side_effect.yml
+    # The id each agent reports, read by the play above. Fleet keeps listing
+    # the enrollment side_effect.yml replaced as online until its last
+    # check-in times out, so agents are matched by id rather than by hostname.
+    test_ids: >-
+      {{ dict(test_expected.keys() | zip(test_expected.keys()
+         | map('extract', hostvars, ['test_status', 'stdout']) | map('from_json')
+         | map(attribute='info.id'))) }}
+  tasks:
+    - name: List the online agents
+      ansible.builtin.uri:
+        url: "{{ test_kibana_url }}/api/fleet/agents?perPage=100&kuery={{ 'status:online' | urlencode }}"
+        url_username: "{{ test_admin_user }}"
+        url_password: "{{ test_admin_password }}"
+        force_basic_auth: true
+        ca_path: /etc/pki/elastic-tls/certs/ca.crt
+      register: test_agents
+      until: >-
+        test_agents.json['items'] | default([]) | map(attribute='id')
+        | select('in', test_ids.values() | list) | list | length >= (test_expected | length)
+      retries: 24
+      delay: 5
+
+    - name: Check each agent is online under its current id, in its policy, with its tags
+      vars:
+        test_found: >-
+          {{ test_agents.json['items'] | selectattr('id', 'equalto', test_ids[item.key]) | list }}
+      ansible.builtin.assert:
+        that:
+          - test_found | length == 1
+          - test_found[0].local_metadata.host.hostname == item.key
+          - test_found[0].policy_id == item.value.policy
+          - (test_found[0].tags | default([]) | sort) == (item.value.tags | sort)
+        fail_msg: "{{ item.key }}: {{ test_found }}"
+      loop: "{{ test_expected | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"

@@ -1,0 +1,59 @@
+---
+# The repository and package tasks are ansible-role-elastic-fleet's, so both
+# roles write the same repository file (disabled, enabled only for the roles'
+# own dnf tasks) and handle Satellite the same way. Its settings are mapped
+# from this role's. install.yml installs the package when it is missing and
+# upgrades it in place when elastic_agent_version changes, after checking the
+# package source has that version.
+- name: Package | Configure the package repository
+  ansible.builtin.include_role:
+    name: "{{ elastic_agent_fleet_role }}"
+    tasks_from: repository.yml
+  vars: &ea_fleet_package_vars
+    elastic_fleet_version: "{{ elastic_agent_version }}"
+    elastic_fleet_repo_source: "{{ elastic_agent_repo_source }}"
+    elastic_fleet_repo_baseurl: "{{ elastic_agent_repo_baseurl }}"
+    elastic_fleet_repo_gpgkey: "{{ elastic_agent_repo_gpgkey }}"
+    elastic_fleet_repo_gpgcheck: "{{ elastic_agent_repo_gpgcheck }}"
+    elastic_fleet_satellite_repo_id: "{{ elastic_agent_satellite_repo_id }}"
+    elastic_fleet_satellite_repo_state: "{{ elastic_agent_satellite_repo_state }}"
+    elastic_fleet_satellite_repo_overrides: "{{ elastic_agent_satellite_repo_overrides }}"
+    elastic_fleet_satellite_refresh: "{{ elastic_agent_satellite_refresh }}"
+    elastic_fleet_satellite_gpgkey: "{{ elastic_agent_satellite_gpgkey }}"
+    elastic_fleet_package_version_check: "{{ elastic_agent_package_version_check }}"
+    elastic_fleet_task_retries: "{{ elastic_agent_task_retries }}"
+    elastic_fleet_task_delay: "{{ elastic_agent_task_delay }}"
+    elastic_fleet_download_async_timeout: "{{ elastic_agent_download_async_timeout }}"
+    elastic_fleet_download_async_poll: "{{ elastic_agent_download_async_poll }}"
+    elastic_fleet_repo_timeout: "{{ elastic_agent_repo_timeout }}"
+    elastic_fleet_repo_retries: "{{ elastic_agent_repo_retries }}"
+    elastic_fleet_dnf_lock_timeout: "{{ elastic_agent_dnf_lock_timeout }}"
+    # install.yml installs when nothing is installed, or when the version
+    # changes on a host that is not an enrolled Fleet Server. Ordinary agents
+    # are upgraded in place, so it is told this host is not one.
+    _ef_installed_version: "{{ _ea_installed_version }}"
+    _ef_version_changing: "{{ _ea_version_changing }}"
+    _ef_is_enrolled: false
+  when: elastic_agent_repo_source != 'none'
+
+- name: Package | Install or upgrade Elastic Agent
+  ansible.builtin.include_role:
+    name: "{{ elastic_agent_fleet_role }}"
+    tasks_from: install.yml
+  vars: *ea_fleet_package_vars
+
+- name: Package | Query the Elastic Agent version now installed  # noqa: command-instead-of-module
+  ansible.builtin.command:
+    cmd: rpm -q --queryformat '%{VERSION}' elastic-agent
+  register: _ea_rpm_after
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# An upgraded agent is restarted (or re-enrolled) by service.yml.
+- name: Package | Record an upgrade
+  ansible.builtin.set_fact:
+    _ea_restart_required: true
+  when:
+    - _ea_installed_version | length > 0
+    - (_ea_rpm_after.stdout | trim) != _ea_installed_version
