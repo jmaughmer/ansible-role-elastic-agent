@@ -95,6 +95,13 @@
     test_expected:
       agent-1: {policy: molecule-a, tags: [molecule, mtls]}
       agent-2: {policy: molecule-b, tags: [molecule, re-enrolled]}   # side_effect.yml
+    # The id each agent reports, read by the play above. Fleet keeps listing
+    # the enrollment side_effect.yml replaced as online until its last
+    # check-in times out, so agents are matched by id rather than by hostname.
+    test_ids: >-
+      {{ dict(test_expected.keys() | zip(test_expected.keys()
+         | map('extract', hostvars, ['test_status', 'stdout']) | map('from_json')
+         | map(attribute='info.id'))) }}
   tasks:
     - name: List the online agents
       ansible.builtin.uri:
@@ -105,18 +112,19 @@
         ca_path: /etc/pki/elastic-tls/certs/ca.crt
       register: test_agents
       until: >-
-        test_agents.json['items'] | default([]) | map(attribute='local_metadata.host.hostname')
-        | select('in', test_expected.keys() | list) | list | length >= (test_expected | length)
+        test_agents.json['items'] | default([]) | map(attribute='id')
+        | select('in', test_ids.values() | list) | list | length >= (test_expected | length)
       retries: 24
       delay: 5
 
-    - name: Check each agent is online once, in its policy, with its tags
+    - name: Check each agent is online under its current id, in its policy, with its tags
       vars:
         test_found: >-
-          {{ test_agents.json['items'] | selectattr('local_metadata.host.hostname', 'equalto', item.key) | list }}
+          {{ test_agents.json['items'] | selectattr('id', 'equalto', test_ids[item.key]) | list }}
       ansible.builtin.assert:
         that:
           - test_found | length == 1
+          - test_found[0].local_metadata.host.hostname == item.key
           - test_found[0].policy_id == item.value.policy
           - (test_found[0].tags | default([]) | sort) == (item.value.tags | sort)
         fail_msg: "{{ item.key }}: {{ test_found }}"
