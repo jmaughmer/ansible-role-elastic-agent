@@ -101,7 +101,7 @@
           xpack.security.http.ssl.certificate: molecule-certs/http.crt
           xpack.security.http.ssl.key: molecule-certs/http.key
           xpack.security.http.ssl.certificate_authorities: [molecule-certs/ca.crt]
-          # CI runners' disks are often past the default watermarks.
+          # Test hosts' disks are often past the default watermarks.
           cluster.routing.allocation.disk.threshold_enabled: false
 
     - name: Set the heap size
