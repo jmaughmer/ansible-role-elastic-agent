@@ -22,7 +22,6 @@
 
 - name: Converge
   hosts: elastic_agent
-  become: true
   gather_facts: false
   tasks:
     - name: Issue the certificates

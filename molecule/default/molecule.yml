@@ -9,7 +9,8 @@
 #                      applied to
 # MOLECULE_DISTRO picks the EL release (default rockylinux9; also
 # rockylinux10). Certificates come from ansible-role-elastic-tls everywhere,
-# as in a real deployment.
+# as in a real deployment. Ansible connects as root, so the playbooks do not
+# use become: sudo fails under PAM in rootless Podman containers.
 role_name_check: 1
 
 dependency:

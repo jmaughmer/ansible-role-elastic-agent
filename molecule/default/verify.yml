@@ -6,7 +6,6 @@
 
 - name: Verify the agents
   hosts: elastic_agent
-  become: true
   gather_facts: false
   vars:
     test_mtls: "{{ elastic_agent_client_certificate | default(false) | bool }}"

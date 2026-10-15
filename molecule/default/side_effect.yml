@@ -11,7 +11,6 @@
 
 - name: Record the agents' ids
   hosts: elastic_agent
-  become: true
   gather_facts: false
   tasks:
     - name: Read the agent id
@@ -21,7 +20,6 @@
 
 - name: Re-enroll agent-2 with an explicit token and new tags
   hosts: agent-2
-  become: true
   gather_facts: false
   vars:
     elastic_agent_enrollment_token: "{{ lookup('ansible.builtin.file', test_secrets_dir ~ '/molecule_b_enrollment_token') }}"
@@ -37,7 +35,6 @@
 
 - name: Check which agents were re-enrolled
   hosts: elastic_agent
-  become: true
   gather_facts: false
   tasks:
     - name: Read the agent id again

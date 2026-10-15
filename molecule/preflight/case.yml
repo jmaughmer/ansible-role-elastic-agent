@@ -6,7 +6,6 @@
 # for passing cases, where the token and the Fleet URL came from.
 - name: Preflight case | {{ test_case.name | default('') }}
   hosts: elastic_agent
-  become: true
   gather_facts: true
   vars:
     test_role: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}"

@@ -22,7 +22,6 @@
 
 - name: Issue the certificates
   hosts: all
-  become: true
   gather_facts: true
   roles:
     - role: elastic_tls
@@ -258,7 +257,6 @@
 
 - name: Deploy Fleet Server
   hosts: fleet_server
-  become: true
   gather_facts: false
   any_errors_fatal: true
   roles:
