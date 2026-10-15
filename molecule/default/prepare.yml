@@ -50,7 +50,8 @@
   vars:
     test_es_conf: /etc/elasticsearch
     test_es_bin: /usr/share/elasticsearch/bin
-    test_es_url: https://localhost:9200
+    # By address: the certificate names the host, not localhost.
+    test_es_url: "https://{{ test_es_address }}:9200"
     test_ca: /etc/pki/elastic-tls/certs/ca.crt
   tasks:
     - name: Install Elasticsearch at the role's default Elastic Agent version
@@ -243,12 +244,11 @@
 
     - name: Wait for Kibana
       ansible.builtin.uri:
-        url: https://localhost:5601/api/status
+        url: "{{ test_kibana_url }}/api/status"
         url_username: "{{ test_admin_user }}"
         url_password: "{{ test_admin_password }}"
         force_basic_auth: true
         ca_path: /etc/pki/elastic-tls/certs/ca.crt
-        validate_certs: false   # the certificate names the host, not localhost
         status_code: [200, 503]
       register: test_kibana_status
       until: (test_kibana_status.json.status.overall.level | default('')) == 'available'
