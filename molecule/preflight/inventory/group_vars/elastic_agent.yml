@@ -1,0 +1,14 @@
+---
+# Settings preflight accepts. Each case in converge.yml overrides some of them
+# with play variables, which take precedence over these.
+#
+# elastic_agent_no_log keeps its default (true): the checks that handle
+# secrets must fail without printing them.
+elastic_agent_version: "9.5.4"
+elastic_agent_kibana_password: preflight-secret-password
+
+# Values the cases use; no failure may print one (case.yml checks)
+test_secrets:
+  - PREFLIGHT-SECRET-TOKEN
+  - preflight-secret-password
+  - PREFLIGHT-SECRET-KEY

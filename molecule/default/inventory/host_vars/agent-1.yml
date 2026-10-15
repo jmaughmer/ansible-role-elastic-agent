@@ -1,0 +1,9 @@
+---
+# Token looked up in Kibana; client certificate (the elastic_tls one, named
+# after the host) presented to Fleet Server.
+elastic_agent_policy_id: molecule-a
+elastic_agent_kibana_url: "{{ test_kibana_url }}"
+elastic_agent_kibana_username: "{{ test_admin_user }}"
+elastic_agent_kibana_password: "{{ test_admin_password }}"
+elastic_agent_client_certificate: true
+elastic_agent_tags: [molecule, mtls]

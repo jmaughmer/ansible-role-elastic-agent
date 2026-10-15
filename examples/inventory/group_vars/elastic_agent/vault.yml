@@ -1,0 +1,9 @@
+---
+# EXAMPLE ONLY - replace the values and encrypt this file:
+#   ansible-vault encrypt inventory/group_vars/elastic_agent/vault.yml
+#
+# API key of a user allowed to read Fleet enrollment tokens (the "encoded"
+# value), created with:
+#   POST /_security/api_key  {"name": "ansible-elastic-agent"}
+# using a user with the Fleet "All" Kibana privilege.
+vault_elastic_agent_kibana_api_key: "CHANGE-ME-encoded-api-key"

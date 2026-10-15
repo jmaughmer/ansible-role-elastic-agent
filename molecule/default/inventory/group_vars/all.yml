@@ -1,0 +1,32 @@
+---
+# Shared by every host and playbook of the scenario.
+
+test_role_dir: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}"
+# The role's own elastic_agent_version. The whole stack is installed at that
+# version and verify.yml expects the agents to end up at it.
+test_default_version: "{{ (lookup('ansible.builtin.file', test_role_dir ~ '/defaults/main.yml') | from_yaml).elastic_agent_version }}"
+
+# By address rather than by name: the containers are not guaranteed to resolve
+# each other's names. ansible-role-elastic-tls puts each host's address in its
+# certificate.
+test_es_address: "{{ hostvars[groups['elasticsearch'] | first].ansible_facts.default_ipv4.address }}"
+test_kibana_address: "{{ hostvars[groups['kibana'] | first].ansible_facts.default_ipv4.address }}"
+test_fleet_address: "{{ hostvars[groups['fleet_server'] | first].ansible_facts.default_ipv4.address }}"
+test_kibana_url: "https://{{ test_kibana_address }}:5601"
+
+# Written on the controller by prepare.yml: service tokens and the enrollment
+# token of the policy agent-2 uses.
+test_secrets_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/secrets"
+
+# Superuser in Elasticsearch's file realm, also used for Kibana.
+test_admin_user: molecule_admin
+test_admin_password: molecule-admin-password
+
+# Agent policies prepare.yml creates: agent-1 looks its token up in Kibana,
+# agent-2 gets it the way ansible-role-elastic-fleet publishes it.
+test_policies: [molecule-a, molecule-b]
+
+# ansible-role-elastic-tls: a private CA on es-1 (the first elasticsearch host).
+elastic_tls_provider: ca
+elastic_tls_ca_common_name: Molecule Test CA
+elastic_tls_ca_passphrase: molecule-test-passphrase

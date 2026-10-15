@@ -1,0 +1,17 @@
+---
+# ansible-role-elastic-tls runs first in the same play: it installs the private
+# CA on each agent (elastic_tls_certificates: [] in group_vars) and publishes
+# it, and this role trusts Fleet Server with it.
+#
+# Run it after the Fleet Server play (ansible-role-elastic-fleet), ideally in
+# the same run: the Fleet Server URL and the enrollment token of each agent
+# policy are then taken from what that role published.
+- name: Install and enroll Elastic Agents
+  hosts: elastic_agent
+  become: true
+  gather_facts: true
+  # No any_errors_fatal: one unreachable endpoint should not stop the rest.
+  # `serial` is fine here, e.g. to upgrade a large fleet a part at a time.
+  roles:
+    - role: elastic_tls
+    - role: elastic_agent

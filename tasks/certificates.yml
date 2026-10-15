@@ -1,0 +1,112 @@
+---
+# Elastic Agent installed from the RPM runs as root, so everything here is
+# root-only. The agent reads these files by path; the paths are part of the
+# enrollment, the contents are not, so a renewed file only needs a restart.
+- name: Certificates | Create TLS directory
+  ansible.builtin.file:
+    path: "{{ elastic_agent_ssl_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# Entries carry either inline content or the path of a file already on the host,
+# such as a certificate issued by ansible-role-elastic-tls.
+- name: Certificates | Install Fleet Server CA certificate
+  ansible.builtin.copy:
+    content: "{{ _ea_fleet_ca_content if (_ea_fleet_ca_content | length) > 0 else omit }}"
+    src: "{{ _ea_fleet_ca_path if (_ea_fleet_ca_path | length) > 0 else omit }}"
+    remote_src: "{{ (_ea_fleet_ca_path | length) > 0 }}"
+    dest: "{{ _ea_fleet_ca_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _ea_tls_ca
+  when: _ea_has_fleet_ca | bool
+
+- name: Certificates | Remove an unused Fleet Server CA certificate
+  ansible.builtin.file:
+    path: "{{ _ea_fleet_ca_file }}"
+    state: absent
+  when: not (_ea_has_fleet_ca | bool)
+
+# Only needed to look the enrollment token up in Kibana; harmless otherwise.
+- name: Certificates | Install Kibana CA certificate
+  ansible.builtin.copy:
+    content: "{{ _ea_kibana_ca_content if (_ea_kibana_ca_content | length) > 0 else omit }}"
+    src: "{{ _ea_kibana_ca_path if (_ea_kibana_ca_path | length) > 0 else omit }}"
+    remote_src: "{{ (_ea_kibana_ca_path | length) > 0 }}"
+    dest: "{{ _ea_kibana_ca_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: _ea_has_kibana_ca | bool
+
+- name: Certificates | Client certificate for mutual TLS with Fleet Server
+  when: elastic_agent_client_certificate | bool
+  block:
+    - name: Certificates | Install client certificate
+      ansible.builtin.copy:
+        content: "{{ _ea_ssl_entry.certificate.content | default(omit) }}"
+        src: "{{ omit if _ea_ssl_entry.certificate.content is defined else _ea_ssl_entry.certificate.path }}"
+        remote_src: "{{ _ea_ssl_entry.certificate.content is not defined }}"
+        dest: "{{ _ea_client_cert_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: _ea_tls_cert
+
+    - name: Certificates | Install client private key
+      ansible.builtin.copy:
+        content: "{{ _ea_ssl_entry.key.content | default(omit) }}"
+        src: "{{ omit if _ea_ssl_entry.key.content is defined else _ea_ssl_entry.key.path }}"
+        remote_src: "{{ _ea_ssl_entry.key.content is not defined }}"
+        dest: "{{ _ea_client_key_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+      register: _ea_tls_key
+      no_log: "{{ elastic_agent_no_log }}"
+      diff: false
+
+    # enroll takes the passphrase of an encrypted key as a file.
+    - name: Certificates | Install client private key passphrase
+      ansible.builtin.copy:
+        content: "{{ _ea_ssl_key_passphrase }}"
+        dest: "{{ _ea_client_key_passphrase_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+      when: (_ea_ssl_key_passphrase | length) > 0
+      no_log: "{{ elastic_agent_no_log }}"
+      diff: false
+
+    - name: Certificates | Verify client key matches certificate
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          cert_pub=$(openssl x509 -in "$EA_CERT" -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum)
+          key_pub=$(openssl pkey -in "$EA_KEY" -passin env:EA_KEY_PASSPHRASE -pubout -outform DER | sha256sum)
+          [ "$cert_pub" = "$key_pub" ]
+        executable: /bin/bash
+      environment:
+        EA_CERT: "{{ _ea_client_cert_file }}"
+        EA_KEY: "{{ _ea_client_key_file }}"
+        EA_KEY_PASSPHRASE: "{{ _ea_ssl_key_passphrase }}"
+      changed_when: false
+      check_mode: false
+      no_log: "{{ elastic_agent_no_log }}"
+
+- name: Certificates | Remove unused client certificate files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ ([] if elastic_agent_client_certificate | bool else [_ea_client_cert_file, _ea_client_key_file])
+       + ([] if (elastic_agent_client_certificate | bool and (_ea_ssl_key_passphrase | length) > 0)
+          else [_ea_client_key_passphrase_file]) }}
+
+- name: Certificates | Flag restart for certificate changes
+  ansible.builtin.set_fact:
+    _ea_restart_required: true
+  when: _ea_tls_ca is changed or _ea_tls_cert is changed or _ea_tls_key is changed

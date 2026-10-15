@@ -1,0 +1,37 @@
+---
+# Each host is handled on its own: agents do not depend on each other, so the
+# role can run with `serial` to upgrade a large fleet a part at a time.
+- name: Gather Elastic Agent state
+  ansible.builtin.import_tasks: facts.yml
+  tags: [elastic_agent, always]
+
+- name: Preflight checks
+  ansible.builtin.import_tasks: preflight.yml
+  tags: [elastic_agent, always]
+
+- name: Install Elastic Agent
+  ansible.builtin.import_tasks: package.yml
+  tags: [elastic_agent, elastic_agent_install]
+
+- name: Install TLS certificates
+  ansible.builtin.import_tasks: certificates.yml
+  tags: [elastic_agent, elastic_agent_tls]
+
+- name: Work out what each host needs
+  ansible.builtin.import_tasks: enrollment.yml
+  tags: [elastic_agent, elastic_agent_enroll, elastic_agent_service]
+
+# Only hosts about to enroll need a token.
+- name: Find the enrollment token
+  ansible.builtin.import_tasks: token.yml
+  tags: [elastic_agent, elastic_agent_enroll, elastic_agent_service]
+
+# Runs before enrolling so a wrong URL, CA or certificate name never reaches the agent.
+- name: Check Fleet Server
+  ansible.builtin.import_tasks: fleet_check.yml
+  when: elastic_agent_fleet_check | bool
+  tags: [elastic_agent, elastic_agent_enroll]
+
+- name: Enroll, start or restart Elastic Agent
+  ansible.builtin.import_tasks: service.yml
+  tags: [elastic_agent, elastic_agent_service]

@@ -1,0 +1,96 @@
+---
+# Internal variables, evaluated lazily (secrets never become facts).
+
+_ea_major_version: "{{ elastic_agent_version.split('.')[0] }}"
+
+# Written by elastic-agent once it is enrolled in Fleet (RPM layout).
+_ea_fleet_enc_file: "{{ elastic_agent_conf_dir }}/fleet.enc"
+# Fingerprint of the settings the agent was last enrolled with, root only.
+_ea_state_file: "{{ elastic_agent_conf_dir }}/.ansible-agent-state.json"
+# Written by ansible-role-elastic-fleet on Fleet Servers.
+_ea_fleet_server_state_file: "{{ elastic_agent_conf_dir }}/.ansible-fleet-server-state.json"
+
+# ---------------------------------------------------------------------------
+# Fleet Server
+# ---------------------------------------------------------------------------
+_ea_fleet_first_host: "{{ (groups[elastic_agent_fleet_group] | default([])) | first | default('') }}"
+_ea_fleet_first_hostvars: "{{ hostvars[_ea_fleet_first_host] if _ea_fleet_first_host | length > 0 else {} }}"
+_ea_default_fleet_url: >-
+  {{ (_ea_fleet_first_hostvars.elastic_fleet_enrollment_urls | default([], true) | first)
+     | default(_ea_fleet_first_hostvars.elastic_fleet_public_urls | default([], true) | first, true)
+     | default(('https://' ~ _ea_fleet_first_host ~ ':' ~ elastic_agent_fleet_port)
+               if _ea_fleet_first_host | length > 0 else '', true) }}
+_ea_fleet_url: "{{ elastic_agent_fleet_url | regex_replace('/+$', '') }}"
+_ea_fleet_status_url: "{{ _ea_fleet_url }}/api/status"
+# The Fleet Servers' version, when the inventory sets it for them.
+_ea_fleet_version: "{{ _ea_fleet_first_hostvars.elastic_fleet_version | default('') }}"
+
+# ---------------------------------------------------------------------------
+# TLS material
+# ---------------------------------------------------------------------------
+# Manually supplied certificates first, then any issued by ansible-role-elastic-tls into
+# elastic_tls_ssl_certificates, so a manual entry always wins when both use one name.
+_ea_ssl_certificates: "{{ (ssl_certificates | default([])) + (elastic_tls_ssl_certificates | default([])) }}"
+_ea_ssl_entry: >-
+  {{ _ea_ssl_certificates
+     | selectattr('name', 'equalto', elastic_agent_ssl_certificate_name)
+     | first | default({}) }}
+_ea_ssl_key_passphrase: "{{ _ea_ssl_entry.key.passphrase | default('') }}"
+
+# Fleet Server CA: the entry's ca, then the role's own setting, then the CA
+# ansible-role-elastic-tls published. None at all means the system trust store.
+_ea_fleet_ca_path: >-
+  {{ _ea_ssl_entry.ca.path | default(elastic_agent_ssl_ca_certificate_path, true)
+     if (_ea_ssl_entry.ca.content | default(elastic_agent_ssl_ca_certificate, true) | length) == 0 else '' }}
+_ea_fleet_ca_content: >-
+  {{ _ea_ssl_entry.ca.content | default(elastic_agent_ssl_ca_certificate, true)
+     | default('' if (_ea_fleet_ca_path | length) > 0 else (elastic_tls_ca_certificate | default('')), true) }}
+_ea_has_fleet_ca: "{{ (_ea_fleet_ca_content | length) > 0 or (_ea_fleet_ca_path | length) > 0 }}"
+
+_ea_kibana_ca_content: "{{ elastic_agent_kibana_ca_certificate | default(_ea_fleet_ca_content, true) }}"
+_ea_kibana_ca_path: >-
+  {{ '' if (_ea_kibana_ca_content | length) > 0
+     else (elastic_agent_kibana_ca_certificate_path | default(_ea_fleet_ca_path, true)) }}
+_ea_has_kibana_ca: "{{ (_ea_kibana_ca_content | length) > 0 or (_ea_kibana_ca_path | length) > 0 }}"
+
+_ea_fleet_ca_file: "{{ elastic_agent_ssl_dir }}/fleet-ca.crt"
+_ea_kibana_ca_file: "{{ elastic_agent_ssl_dir }}/kibana-ca.crt"
+_ea_client_cert_file: "{{ elastic_agent_ssl_dir }}/agent.crt"
+_ea_client_key_file: "{{ elastic_agent_ssl_dir }}/agent.key"
+_ea_client_key_passphrase_file: "{{ elastic_agent_ssl_dir }}/agent.key.passphrase"
+
+# ---------------------------------------------------------------------------
+# Enrollment
+# ---------------------------------------------------------------------------
+# Everything but the token, which enroll only takes on its command line; it is
+# added when the command runs, under no_log. The key passphrase is a file.
+_ea_enroll_argv: >-
+  {{ ['/usr/bin/elastic-agent', 'enroll', '--force', '--url=' ~ _ea_fleet_url]
+     + (['--certificate-authorities=' ~ _ea_fleet_ca_file] if _ea_has_fleet_ca | bool else [])
+     + ((['--elastic-agent-cert=' ~ _ea_client_cert_file, '--elastic-agent-cert-key=' ~ _ea_client_key_file]
+         + (['--elastic-agent-cert-key-passphrase=' ~ _ea_client_key_passphrase_file]
+            if (_ea_ssl_key_passphrase | length) > 0 else []))
+        if elastic_agent_client_certificate | bool else [])
+     + (['--tag=' ~ (elastic_agent_tags | join(','))] if elastic_agent_tags | length > 0 else [])
+     + elastic_agent_enroll_extra_args }}
+
+# Recorded (salted and hashed) with the enrollment: what, when it changes,
+# needs a new one. The token is left out: any valid token of the same policy
+# gives the same result.
+_ea_enroll_identity: "{{ (_ea_enroll_argv + ['policy=' ~ elastic_agent_policy_id]) | join('\n') }}"
+
+# ---------------------------------------------------------------------------
+# Kibana
+# ---------------------------------------------------------------------------
+_ea_kibana_url: "{{ elastic_agent_kibana_url | regex_replace('/+$', '') }}"
+_ea_kibana_basic_auth: "{{ (elastic_agent_kibana_api_key | length) == 0 }}"
+_ea_kibana_has_credentials: >-
+  {{ (elastic_agent_kibana_api_key | length) > 0
+     or ((elastic_agent_kibana_username | length) > 0 and (elastic_agent_kibana_password | length) > 0) }}
+_ea_kibana_headers: >-
+  {{ {'kbn-xsrf': 'ansible', 'elastic-api-version': '2023-10-31'}
+     | combine({'Authorization': 'ApiKey ' ~ elastic_agent_kibana_api_key}
+               if not (_ea_kibana_basic_auth | bool) else {}) }}
+
+# elastic-agent status reports states as numbers or names, depending on the release.
+_ea_state_names: [STARTING, CONFIGURING, HEALTHY, DEGRADED, FAILED, STOPPING, STOPPED, UPGRADING, ROLLBACK]

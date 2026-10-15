@@ -1,0 +1,315 @@
+---
+# Builds the stack the agents enroll into. Runs once, after the containers are
+# created:
+#   - every host gets iproute (without it there are no network facts) and
+#     openssl (the roles check keys and certificates with it);
+#   - ansible-role-elastic-tls issues every host's certificate from a private CA
+#     on es-1 (agent-2 only gets the CA);
+#   - Elasticsearch runs as a single node with TLS on HTTP and a file-realm
+#     superuser, and issues service tokens for Kibana and Fleet Server;
+#   - Kibana runs with TLS, connected to it;
+#   - ansible-role-elastic-fleet deploys Fleet Server on fleet-1;
+#   - the agent policies in test_policies are created, and the enrollment
+#     token of molecule-b is kept for converge.yml.
+- name: Install what the roles and the tests need
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Install iproute and openssl
+      ansible.builtin.dnf:
+        name: [iproute, openssl]
+        state: present
+
+- name: Issue the certificates
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - role: elastic_tls
+
+- name: Install the Elastic repository
+  hosts: elasticsearch:kibana
+  gather_facts: false
+  tasks:
+    - name: Import the Elastic GPG key
+      ansible.builtin.rpm_key:
+        key: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+
+    - name: Add the Elastic repository
+      ansible.builtin.yum_repository:
+        name: elastic-molecule
+        description: Elastic packages (Molecule)
+        baseurl: "https://artifacts.elastic.co/packages/{{ test_default_version.split('.')[0] }}.x/yum"
+        gpgcheck: true
+        gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        enabled: true
+
+- name: Install and start Elasticsearch
+  hosts: elasticsearch
+  gather_facts: false
+  vars:
+    test_es_conf: /etc/elasticsearch
+    test_es_bin: /usr/share/elasticsearch/bin
+    test_es_url: https://localhost:9200
+    test_ca: /etc/pki/elastic-tls/certs/ca.crt
+  tasks:
+    - name: Install Elasticsearch at the role's default Elastic Agent version
+      ansible.builtin.dnf:
+        name: "elasticsearch-{{ test_default_version }}"
+        state: present
+
+    - name: Create the certificate directory
+      ansible.builtin.file:
+        path: "{{ test_es_conf }}/molecule-certs"
+        state: directory
+        owner: root
+        group: elasticsearch
+        mode: "0750"
+
+    - name: Install the HTTP certificate, key and CA from ansible-role-elastic-tls
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ test_es_conf }}/molecule-certs/{{ item.dest }}"
+        remote_src: true
+        owner: root
+        group: elasticsearch
+        mode: "0640"
+      loop:
+        - {src: "/etc/pki/elastic-tls/certs/{{ inventory_hostname }}.crt", dest: http.crt}
+        - {src: "/etc/pki/elastic-tls/private/{{ inventory_hostname }}.key", dest: http.key}
+        - {src: "{{ test_ca }}", dest: ca.crt}
+
+    # Replaces what the package's security auto-configuration wrote.
+    # single-node discovery also skips the bootstrap checks.
+    - name: Configure Elasticsearch
+      ansible.builtin.copy:
+        dest: "{{ test_es_conf }}/elasticsearch.yml"
+        owner: root
+        group: elasticsearch
+        mode: "0660"
+        content: |
+          cluster.name: molecule
+          node.name: {{ inventory_hostname }}
+          path.data: /var/lib/elasticsearch
+          path.logs: /var/log/elasticsearch
+          network.host: 0.0.0.0
+          discovery.type: single-node
+          xpack.ml.enabled: false
+          xpack.security.enabled: true
+          xpack.security.http.ssl.enabled: true
+          xpack.security.http.ssl.certificate: molecule-certs/http.crt
+          xpack.security.http.ssl.key: molecule-certs/http.key
+          xpack.security.http.ssl.certificate_authorities: [molecule-certs/ca.crt]
+          # CI runners' disks are often past the default watermarks.
+          cluster.routing.allocation.disk.threshold_enabled: false
+
+    - name: Set the heap size
+      ansible.builtin.copy:
+        dest: "{{ test_es_conf }}/jvm.options.d/molecule.options"
+        owner: root
+        group: elasticsearch
+        mode: "0640"
+        content: |
+          -Xms1g
+          -Xmx1g
+
+    # The auto-configured keystore holds passwords for keystores that no longer
+    # exist, so start from an empty one.
+    - name: Create the keystore and the superuser
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          rm -f "$CONF/elasticsearch.keystore"
+          "$BIN/elasticsearch-keystore" create --silent
+          "$BIN/elasticsearch-users" useradd "$ADMIN_USER" -p "$ADMIN_PASSWORD" -r superuser
+          touch "$CONF/.molecule-users"
+        creates: "{{ test_es_conf }}/.molecule-users"
+        executable: /bin/bash
+      environment:
+        CONF: "{{ test_es_conf }}"
+        BIN: "{{ test_es_bin }}"
+        ADMIN_USER: "{{ test_admin_user }}"
+        ADMIN_PASSWORD: "{{ test_admin_password }}"
+
+    - name: Let Elasticsearch read the keystore and the file realm
+      ansible.builtin.file:
+        path: "{{ test_es_conf }}/{{ item }}"
+        owner: root
+        group: elasticsearch
+        mode: "0660"
+      loop: [elasticsearch.keystore, users, users_roles]
+
+    - name: Start Elasticsearch
+      ansible.builtin.systemd_service:
+        name: elasticsearch
+        state: started
+        enabled: true
+
+    - name: Wait for the cluster
+      ansible.builtin.uri:
+        url: "{{ test_es_url }}/_cluster/health?wait_for_status=yellow&timeout=30s"
+        url_username: "{{ test_admin_user }}"
+        url_password: "{{ test_admin_password }}"
+        force_basic_auth: true
+        ca_path: "{{ test_ca }}"
+      register: test_health
+      until: test_health.status == 200
+      retries: 30
+      delay: 5
+
+    - name: Create the service tokens for Kibana and Fleet Server
+      ansible.builtin.uri:
+        url: "{{ test_es_url }}/_security/service/elastic/{{ item }}/credential/token/molecule"
+        method: POST
+        url_username: "{{ test_admin_user }}"
+        url_password: "{{ test_admin_password }}"
+        force_basic_auth: true
+        ca_path: "{{ test_ca }}"
+      loop: [kibana, fleet-server]
+      register: test_tokens
+
+    - name: Create the secrets directory on the controller
+      ansible.builtin.file:
+        path: "{{ test_secrets_dir }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: Keep the service tokens on the controller
+      ansible.builtin.copy:
+        content: "{{ item.json.token.value }}"
+        dest: "{{ test_secrets_dir }}/{{ item.item | replace('-', '_') }}_service_token"
+        mode: "0600"
+      loop: "{{ test_tokens.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      delegate_to: localhost
+      become: false
+
+- name: Install and start Kibana
+  hosts: kibana
+  gather_facts: false
+  tasks:
+    - name: Install Kibana
+      ansible.builtin.dnf:
+        name: "kibana-{{ test_default_version }}"
+        state: present
+
+    - name: Create the certificate directory
+      ansible.builtin.file:
+        path: /etc/kibana/molecule-certs
+        state: directory
+        owner: root
+        group: kibana
+        mode: "0750"
+
+    - name: Install the certificate, key and CA from ansible-role-elastic-tls
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "/etc/kibana/molecule-certs/{{ item.dest }}"
+        remote_src: true
+        owner: root
+        group: kibana
+        mode: "0640"
+      loop:
+        - {src: "/etc/pki/elastic-tls/certs/{{ inventory_hostname }}.crt", dest: kibana.crt}
+        - {src: "/etc/pki/elastic-tls/private/{{ inventory_hostname }}.key", dest: kibana.key}
+        - {src: /etc/pki/elastic-tls/certs/ca.crt, dest: ca.crt}
+
+    - name: Configure Kibana
+      ansible.builtin.copy:
+        dest: /etc/kibana/kibana.yml
+        owner: root
+        group: kibana
+        mode: "0660"
+        content: |
+          server.host: 0.0.0.0
+          server.ssl.enabled: true
+          server.ssl.certificate: /etc/kibana/molecule-certs/kibana.crt
+          server.ssl.key: /etc/kibana/molecule-certs/kibana.key
+          elasticsearch.hosts: ["https://{{ test_es_address }}:9200"]
+          elasticsearch.serviceAccountToken: {{ lookup('ansible.builtin.file', test_secrets_dir ~ '/kibana_service_token') }}
+          elasticsearch.ssl.certificateAuthorities: [/etc/kibana/molecule-certs/ca.crt]
+          xpack.encryptedSavedObjects.encryptionKey: molecule-saved-objects-key-0123456789abcdef
+          telemetry.optIn: false
+          telemetry.allowChangingOptInStatus: false
+
+    - name: Start Kibana
+      ansible.builtin.systemd_service:
+        name: kibana
+        state: started
+        enabled: true
+
+    - name: Wait for Kibana
+      ansible.builtin.uri:
+        url: https://localhost:5601/api/status
+        url_username: "{{ test_admin_user }}"
+        url_password: "{{ test_admin_password }}"
+        force_basic_auth: true
+        ca_path: /etc/pki/elastic-tls/certs/ca.crt
+        validate_certs: false   # the certificate names the host, not localhost
+        status_code: [200, 503]
+      register: test_kibana_status
+      until: (test_kibana_status.json.status.overall.level | default('')) == 'available'
+      retries: 60
+      delay: 5
+
+- name: Deploy Fleet Server
+  hosts: fleet_server
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  roles:
+    - role: elastic_fleet
+
+- name: Create the agent policies
+  hosts: kibana
+  gather_facts: false
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ test_admin_user }}"
+      url_password: "{{ test_admin_password }}"
+      force_basic_auth: true
+      ca_path: /etc/pki/elastic-tls/certs/ca.crt
+      headers:
+        kbn-xsrf: molecule
+      body_format: json
+  tasks:
+    - name: Look up the agent policies
+      ansible.builtin.uri:
+        url: "{{ test_kibana_url }}/api/fleet/agent_policies/{{ item }}"
+        status_code: [200, 404]
+      loop: "{{ test_policies }}"
+      register: test_policy_lookup
+
+    # No System integration: the agents only run their own monitoring, which
+    # needs nothing from the package registry.
+    - name: Create the agent policies
+      ansible.builtin.uri:
+        url: "{{ test_kibana_url }}/api/fleet/agent_policies?sys_monitoring=false"
+        method: POST
+        body:
+          id: "{{ item.item }}"
+          name: "Molecule {{ item.item }}"
+          namespace: default
+          monitoring_enabled: [logs, metrics]
+      loop: "{{ test_policy_lookup.results | selectattr('status', 'equalto', 404) | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Read the enrollment tokens of molecule-b
+      ansible.builtin.uri:
+        url: "{{ test_kibana_url }}/api/fleet/enrollment_api_keys?kuery={{ 'policy_id:\"molecule-b\"' | urlencode }}"
+      register: test_keys
+
+    - name: Keep the enrollment token of molecule-b on the controller
+      ansible.builtin.copy:
+        content: >-
+          {{ (test_keys.json['items'] | selectattr('policy_id', 'equalto', 'molecule-b') | selectattr('active')
+              | first).api_key }}
+        dest: "{{ test_secrets_dir }}/molecule_b_enrollment_token"
+        mode: "0600"
+      delegate_to: localhost
+      become: false

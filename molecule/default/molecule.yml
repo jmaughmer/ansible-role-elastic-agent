@@ -1,0 +1,84 @@
+---
+# Five systemd containers (rootless Podman is fine) on one network:
+#   es-1               Elasticsearch, single node, installed by prepare.yml;
+#                      also the CA host of ansible-role-elastic-tls
+#   kb-1               Kibana, installed by prepare.yml
+#   fleet-1            Fleet Server, deployed by ansible-role-elastic-fleet
+#                      in prepare.yml
+#   agent-1, agent-2   the inventory group "elastic_agent", which the role is
+#                      applied to
+# MOLECULE_DISTRO picks the EL release (default rockylinux9; also
+# rockylinux10). Certificates come from ansible-role-elastic-tls everywhere,
+# as in a real deployment.
+role_name_check: 1
+
+dependency:
+  name: galaxy   # installs requirements.yml next to this file
+
+driver:
+  name: podman
+
+platforms:
+  - name: es-1
+    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+    pre_build_image: true
+    override_command: false   # keep the image's own CMD: systemd as PID 1
+    systemd: always
+    network: elastic_agent_molecule  # created by the driver from the first platform
+    groups: [elasticsearch]
+
+  - name: kb-1
+    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+    pre_build_image: true
+    override_command: false
+    systemd: always
+    network: elastic_agent_molecule
+    groups: [kibana]
+
+  - name: fleet-1
+    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+    pre_build_image: true
+    override_command: false
+    systemd: always
+    network: elastic_agent_molecule
+    groups: [fleet_server]
+
+  - name: agent-1
+    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+    pre_build_image: true
+    override_command: false
+    systemd: always
+    network: elastic_agent_molecule
+    groups: [elastic_agent]
+
+  - name: agent-2
+    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+    pre_build_image: true
+    override_command: false
+    systemd: always
+    network: elastic_agent_molecule
+    groups: [elastic_agent]
+
+provisioner:
+  name: ansible
+  inventory:
+    links:
+      group_vars: inventory/group_vars/
+      host_vars: inventory/host_vars/
+
+verifier:
+  name: ansible
+
+scenario:
+  test_sequence:
+    - dependency
+    - destroy
+    - syntax
+    - create
+    - prepare
+    - converge
+    - idempotence
+    - check
+    - side_effect
+    - verify
+    - destroy

@@ -1,0 +1,6 @@
+---
+# Shared with the Fleet Server play (ansible-role-elastic-fleet). The agents
+# read both through hostvars: the URL to enroll through, and the version they
+# must not be newer than.
+elastic_fleet_version: "9.5.4"
+elastic_fleet_public_urls: ["https://fleet.example.com:8220"]

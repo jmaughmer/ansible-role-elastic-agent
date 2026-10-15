@@ -1,0 +1,23 @@
+---
+galaxy_info:
+  role_name: elastic_agent
+  namespace: jmaughmer
+  author: Justin Maughmer
+  description: Install Elastic Agent 9.x on RHEL, AlmaLinux and Rocky Linux 9/10 and enroll it into Fleet, with TLS and in-place upgrades
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    # EL: RHEL, AlmaLinux and Rocky Linux
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+  galaxy_tags:
+    - elasticagent
+    - fleet
+    - elastic
+    - observability
+
+# ansible-role-elastic-fleet is used for its package tasks only (include_role
+# with tasks_from), so it is a requirement, not a dependency that would run.
+dependencies: []

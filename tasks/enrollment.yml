@@ -1,0 +1,38 @@
+---
+# elastic-agent cannot report the settings it was enrolled with, so the role
+# records a salted SHA-256 of them (arguments, policy, key passphrase) in a
+# root-only state file, and re-enrolls when they change.
+
+- name: Enrollment | Choose fingerprint salt
+  ansible.builtin.set_fact:
+    _ea_state_salt: >-
+      {{ _ea_state.salt | default(lookup('ansible.builtin.password', '/dev/null',
+                                         chars=['ascii_letters', 'digits'], length=32)) }}
+
+- name: Enrollment | Work out the enrollment for this host
+  ansible.builtin.set_fact:
+    _ea_state_desired:
+      salt: "{{ _ea_state_salt }}"
+      fingerprint: >-
+        {{ (_ea_state_salt ~ '\n' ~ _ea_enroll_identity ~ '\n' ~ _ea_ssl_key_passphrase) | hash('sha256') }}
+  no_log: "{{ elastic_agent_no_log }}"
+
+- name: Enrollment | Decide what this host needs
+  vars:
+    _ea_settings_changed: >-
+      {{ (_ea_is_enrolled | bool) and (_ea_state.fingerprint | default('')) != _ea_state_desired.fingerprint }}
+  ansible.builtin.set_fact:
+    _ea_settings_changed_fact: "{{ _ea_settings_changed | bool }}"
+    _ea_needs_enroll: >-
+      {{ not (_ea_is_enrolled | bool)
+         or ((_ea_settings_changed | bool) and (elastic_agent_reenroll_on_change | bool)) }}
+
+- name: Enrollment | Report a re-enrollment that was skipped
+  ansible.builtin.debug:
+    msg: >-
+      The enrollment settings of {{ inventory_hostname }} changed (Fleet URL, policy, CA, client certificate,
+      tags or extra arguments), but elastic_agent_reenroll_on_change is false, so it keeps running with the
+      old ones. Re-run with -e elastic_agent_reenroll_on_change=true to re-enroll it.
+  when:
+    - _ea_settings_changed_fact | bool
+    - not (elastic_agent_reenroll_on_change | bool)

@@ -1,0 +1,24 @@
+---
+elastic_agent_version: "9.5.4"
+
+# ------------------------------------------------------------------ package source
+# Default: Elastic's public repository. To install from Red Hat Satellite / Katello:
+# elastic_agent_repo_source: satellite
+# elastic_agent_satellite_repo_id: ACME_Elastic_Elastic_9_x
+# elastic_agent_satellite_repo_state: disabled
+
+# ------------------------------------------------------------------ certificates
+# Only the CA: agents do not need certificates of their own unless Fleet Server
+# requires client certificates (elastic_agent_client_certificate).
+elastic_tls_certificates: []
+
+# ------------------------------------------------------------------ enrollment
+# Created by ansible-role-elastic-fleet (elastic_fleet_agent_policies).
+elastic_agent_policy_id: agent-policy
+elastic_agent_tags: [linux]
+
+# The enrollment token comes from ansible-role-elastic-fleet when it ran earlier
+# in the same run. Otherwise it is looked up in Kibana with these credentials,
+# or set it directly with elastic_agent_enrollment_token.
+elastic_agent_kibana_url: "https://kb-1.example.com:5601"
+elastic_agent_kibana_api_key: "{{ vault_elastic_agent_kibana_api_key }}"
