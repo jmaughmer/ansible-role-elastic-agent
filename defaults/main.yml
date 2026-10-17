@@ -3,12 +3,14 @@
 # Platform
 # =============================================================================
 # Distributions accepted by preflight, as reported by ansible_facts['distribution'].
-# Major versions 9 and 10 are supported. Other Enterprise Linux rebuilds, such as
-# CentOS (Stream) or OracleLinux, can be added here but are not tested.
+# Enterprise Linux 9 and 10 and Ubuntu 24.04 and 26.04 are supported. Other
+# Enterprise Linux rebuilds, such as CentOS (Stream) or OracleLinux, can be added
+# here but are not tested.
 elastic_agent_supported_distributions:
   - RedHat
   - AlmaLinux
   - Rocky
+  - Ubuntu
 
 # =============================================================================
 # Package / repository
@@ -20,8 +22,9 @@ elastic_agent_supported_distributions:
 elastic_agent_fleet_role: elastic_fleet
 
 # Exact 9.x release of the elastic-agent package. Must not be newer
-# (major.minor) than Fleet Server. Changing it upgrades the package with dnf
-# and restarts the agent: Fleet cannot upgrade an agent installed from an RPM.
+# (major.minor) than Fleet Server. Changing it upgrades the package with dnf or
+# apt and restarts the agent: Fleet cannot upgrade an agent installed from an
+# RPM or Debian package.
 elastic_agent_version: "9.5.4"
 
 # Where the elastic-agent package comes from: elastic, satellite or none. The
@@ -29,11 +32,13 @@ elastic_agent_version: "9.5.4"
 elastic_agent_repo_source: elastic
 
 # --- elastic_agent_repo_source: elastic ---
-elastic_agent_repo_baseurl: "https://artifacts.elastic.co/packages/{{ elastic_agent_version.split('.')[0] }}.x/yum"
+# The yum repository on Enterprise Linux, the apt one (suite stable, component main) on Ubuntu.
+elastic_agent_repo_baseurl: >-
+  https://artifacts.elastic.co/packages/{{ elastic_agent_version.split('.')[0] }}.x/{{ 'apt' if ansible_facts['os_family'] == 'Debian' else 'yum' }}
 elastic_agent_repo_gpgkey: "https://artifacts.elastic.co/GPG-KEY-elasticsearch"
 elastic_agent_repo_gpgcheck: true
 
-# --- elastic_agent_repo_source: satellite ---
+# --- elastic_agent_repo_source: satellite (Enterprise Linux only) ---
 elastic_agent_satellite_repo_id: ""
 # unmanaged, enabled or disabled
 elastic_agent_satellite_repo_state: unmanaged
@@ -156,6 +161,7 @@ elastic_agent_download_async_timeout: 3600
 elastic_agent_download_async_poll: 15
 elastic_agent_repo_timeout: 120
 elastic_agent_repo_retries: 10
+# Seconds to wait for the dnf or apt lock
 elastic_agent_dnf_lock_timeout: 300
 # Per-request HTTP timeout (seconds) for Fleet Server and Kibana
 elastic_agent_api_timeout: 30

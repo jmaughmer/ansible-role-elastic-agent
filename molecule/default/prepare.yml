@@ -15,10 +15,22 @@
   hosts: all
   gather_facts: false
   tasks:
+    - name: Read the distribution
+      ansible.builtin.setup:
+        gather_subset: [min]
+
     - name: Install iproute and openssl
       ansible.builtin.dnf:
         name: [iproute, openssl]
         state: present
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Install iproute2 and openssl
+      ansible.builtin.apt:
+        name: [iproute2, openssl]
+        state: present
+        update_cache: true
+      when: ansible_facts['os_family'] == 'Debian'
 
 - name: Issue the certificates
   hosts: all
@@ -30,19 +42,8 @@
   hosts: elasticsearch:kibana
   gather_facts: false
   tasks:
-    - name: Import the Elastic GPG key
-      ansible.builtin.rpm_key:
-        key: https://artifacts.elastic.co/GPG-KEY-elasticsearch
-        state: present
-
     - name: Add the Elastic repository
-      ansible.builtin.yum_repository:
-        name: elastic-molecule
-        description: Elastic packages (Molecule)
-        baseurl: "https://artifacts.elastic.co/packages/{{ test_default_version.split('.')[0] }}.x/yum"
-        gpgcheck: true
-        gpgkey: https://artifacts.elastic.co/GPG-KEY-elasticsearch
-        enabled: true
+      ansible.builtin.include_tasks: tasks/elastic_repo.yml
 
 - name: Install and start Elasticsearch
   hosts: elasticsearch
@@ -55,8 +56,8 @@
     test_ca: /etc/pki/elastic-tls/certs/ca.crt
   tasks:
     - name: Install Elasticsearch at the role's default Elastic Agent version
-      ansible.builtin.dnf:
-        name: "elasticsearch-{{ test_default_version }}"
+      ansible.builtin.package:
+        name: "elasticsearch{{ '=' if ansible_facts['os_family'] == 'Debian' else '-' }}{{ test_default_version }}"
         state: present
 
     - name: Create the certificate directory
@@ -193,8 +194,8 @@
   gather_facts: false
   tasks:
     - name: Install Kibana
-      ansible.builtin.dnf:
-        name: "kibana-{{ test_default_version }}"
+      ansible.builtin.package:
+        name: "kibana{{ '=' if ansible_facts['os_family'] == 'Debian' else '-' }}{{ test_default_version }}"
         state: present
 
     - name: Create the certificate directory

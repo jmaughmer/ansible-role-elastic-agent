@@ -3,7 +3,12 @@
 
 _ea_major_version: "{{ elastic_agent_version.split('.')[0] }}"
 
-# Written by elastic-agent once it is enrolled in Fleet (RPM layout).
+# Prints the installed elastic-agent version (dpkg-query prefixes its state).
+_ea_pkg_version_cmd: >-
+  {{ "dpkg-query -W -f='${Status} ${Version}' elastic-agent" if ansible_facts['os_family'] == 'Debian'
+     else "rpm -q --queryformat '%{VERSION}' elastic-agent" }}
+
+# Written by elastic-agent once it is enrolled in Fleet (package layout).
 _ea_fleet_enc_file: "{{ elastic_agent_conf_dir }}/fleet.enc"
 # Fingerprint of the settings the agent was last enrolled with, root only.
 _ea_state_file: "{{ elastic_agent_conf_dir }}/.ansible-agent-state.json"

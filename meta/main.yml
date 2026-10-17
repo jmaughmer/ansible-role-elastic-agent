@@ -3,7 +3,7 @@ galaxy_info:
   role_name: elastic_agent
   namespace: jmaughmer
   author: Justin Maughmer
-  description: Install Elastic Agent 9.x on RHEL, AlmaLinux and Rocky Linux 9/10 and enroll it into Fleet, with TLS and in-place upgrades
+  description: Install Elastic Agent 9.x on RHEL, AlmaLinux and Rocky Linux 9/10 and Ubuntu 24.04/26.04 and enroll it into Fleet, with TLS and in-place upgrades
   license: MIT
   min_ansible_version: "2.15"
   platforms:
@@ -12,6 +12,10 @@ galaxy_info:
       versions:
         - "9"
         - "10"
+    - name: Ubuntu
+      versions:
+        - noble     # 24.04
+        - resolute  # 26.04
   galaxy_tags:
     - elasticagent
     - fleet
