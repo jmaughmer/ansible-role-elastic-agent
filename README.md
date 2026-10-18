@@ -1,6 +1,6 @@
 # ansible-role-elastic-agent
 
-An Ansible role that installs Elastic Agent 9.x from the RPM package and enrolls it into **Fleet**, through the Fleet Server deployed by [ansible-role-elastic-fleet](https://github.com/jmaughmer/ansible-role-elastic-fleet), on RHEL, AlmaLinux and Rocky Linux 9 and 10.
+An Ansible role that installs Elastic Agent 9.x from Elastic's RPM or Debian package and enrolls it into **Fleet**, through the Fleet Server deployed by [ansible-role-elastic-fleet](https://github.com/jmaughmer/ansible-role-elastic-fleet), on RHEL, AlmaLinux and Rocky Linux 9 and 10, and on Ubuntu 24.04 and 26.04.
 
 What it does:
 
@@ -18,18 +18,21 @@ What it does:
   ansible-galaxy install -r requirements.yml
   ```
 
-- **Target hosts:** RHEL, AlmaLinux or Rocky Linux 9 or 10, with `openssl` (installed by default). A host must not be a Fleet Server: that is already an Elastic Agent.
+- **Target hosts:** RHEL, AlmaLinux or Rocky Linux 9 or 10, or Ubuntu 24.04 or 26.04, with `openssl` (installed by default). A host must not be a Fleet Server: that is already an Elastic Agent.
 - **Fleet Server 9.x**, at least the version of the agents, and an **agent policy** to enroll into. ansible-role-elastic-fleet creates `agent-policy` by default (`elastic_fleet_agent_policies`); this role never creates policies.
 
 ## Supported platforms
 
-| Distribution | `ansible_facts['distribution']` | Major versions |
+| Distribution | `ansible_facts['distribution']` | Versions |
 |---|---|---|
 | Red Hat Enterprise Linux | `RedHat` | 9, 10 |
 | AlmaLinux | `AlmaLinux` | 9, 10 |
 | Rocky Linux | `Rocky` | 9, 10 |
+| Ubuntu | `Ubuntu` | 24.04, 26.04 |
 
-Preflight stops the run on any other distribution or major version; add others to `elastic_agent_supported_distributions` at your own risk.
+The package comes through dnf on Enterprise Linux and through apt on Ubuntu; everything else runs the same tasks on both. Satellite is Enterprise Linux only.
+
+Preflight stops the run on any other distribution or version; add others to `elastic_agent_supported_distributions` at your own risk.
 
 ## Installation
 
@@ -145,20 +148,20 @@ An agent enrolled by hand has no record, so the role enrolls it again on the fir
 
 ## Upgrades
 
-Change `elastic_agent_version`. Fleet cannot upgrade an agent installed from an RPM, so the role upgrades the package with dnf and restarts the agent.
+Change `elastic_agent_version`. Fleet cannot upgrade an agent installed from an RPM or Debian package, so the role upgrades the package with dnf or apt and restarts the agent.
 
 - **Order:** Elasticsearch, Kibana, Fleet Server, then the agents. When the inventory sets `elastic_fleet_version` for the Fleet Servers, preflight refuses an agent newer than them.
 - **Downgrades and major upgrades** are refused.
-- `dnf update` never upgrades Elastic Agent behind the role's back: the repository file is written disabled and enabled only for the role's own tasks.
+- `dnf update` never upgrades Elastic Agent behind the role's back: the repository file is written disabled and enabled only for the role's own tasks. On Ubuntu the package is held (`apt-mark hold`), so `apt upgrade` skips it; `apt-mark unhold elastic-agent` before upgrading it by hand.
 
 ## Package source
 
-The repository and package tasks are ansible-role-elastic-fleet's `tasks/repository.yml` and `tasks/install.yml` (with its `package_version_check.yml`), run through `include_role` with this role's settings mapped onto theirs. Both roles therefore write the same repository file, `/etc/yum.repos.d/elastic-agent.repo`, and handle Satellite the same way.
+The repository and package tasks are ansible-role-elastic-fleet's `tasks/repository.yml` and `tasks/install.yml` (with its `package_version_check.yml`), run through `include_role` with this role's settings mapped onto theirs. Both roles therefore write the same repository file, `/etc/yum.repos.d/elastic-agent.repo` on Enterprise Linux or the apt source `/etc/apt/sources.list.d/elastic-9.x.sources` with the key `/etc/apt/keyrings/elastic.asc` on Ubuntu, and handle Satellite the same way. The Elasticsearch, Kibana and Logstash roles write the same apt source, so a host running several of them keeps one definition.
 
 | `elastic_agent_repo_source` | Packages come from |
 |---|---|
-| `elastic` (default) | `elastic_agent_repo_baseurl`, Elastic's public repository or a mirror of it |
-| `satellite` | `elastic_agent_satellite_repo_id`, a repository delivered by Red Hat Satellite or Katello; see ansible-role-elastic-fleet for `_repo_state`, `_repo_overrides`, `_refresh` and `_gpgkey` |
+| `elastic` (default) | `elastic_agent_repo_baseurl`, Elastic's public repository or a mirror of it (yum or apt, to match the host) |
+| `satellite` | Enterprise Linux only. `elastic_agent_satellite_repo_id`, a repository delivered by Red Hat Satellite or Katello; see ansible-role-elastic-fleet for `_repo_state`, `_repo_overrides`, `_refresh` and `_gpgkey` |
 | `none` | Whatever the host has enabled |
 
 `elastic_agent_fleet_role` names the installed role (default `elastic_fleet`).
@@ -169,7 +172,7 @@ The repository and package tasks are ansible-role-elastic-fleet's `tasks/reposit
 |---|---|---|
 | `elastic_agent_task_retries`, `elastic_agent_task_delay` | `3`, `15` | Retries for downloads and API calls |
 | `elastic_agent_download_async_timeout`, `_poll` | `3600`, `15` | Package download time limit and poll interval |
-| `elastic_agent_repo_timeout`, `elastic_agent_repo_retries` | `120`, `10` | dnf per-request timeout and retries |
+| `elastic_agent_repo_timeout`, `elastic_agent_repo_retries` | `120`, `10` | dnf per-request timeout and retries (Enterprise Linux only) |
 | `elastic_agent_api_timeout` | `30` | Per-request HTTP timeout |
 | `elastic_agent_enroll_timeout` | `300` | How long enroll may take |
 | `elastic_agent_ready_retries`, `elastic_agent_ready_delay` | `60`, `5` | Waiting for the agent to connect |
@@ -253,13 +256,18 @@ KVM/libvirt (`qemu:///system`). Each VM has its own kernel, so SELinux is enforc
 as `vm.max_map_count` are the VM's own. Overrides for the VMs go in
 `molecule/kvm/inventory/group_vars/<group>/kvm.yml`.
 
+[`molecule/kvm-ubuntu2404/`](molecule/kvm-ubuntu2404/) and
+[`molecule/kvm-ubuntu2604/`](molecule/kvm-ubuntu2604/) run the same thing on Ubuntu 24.04 and 26.04
+VMs. They only swap the cloud image, and share `molecule/kvm/`'s playbooks and inventory.
+
 ```bash
-molecule test -s kvm
+for s in kvm kvm-ubuntu2404 kvm-ubuntu2604; do molecule test -s "$s" || break; done
 ```
 
 The machine running Molecule needs libvirt, `virt-install`, `qemu-img` and `xorriso`, and its user
-must be able to manage `qemu:///system`. The AlmaLinux 10 cloud image downloads once, checksum
-verified, to `/var/lib/libvirt/images/molecule`; each VM gets a throwaway disk on top of it.
+must be able to manage `qemu:///system`. Each cloud image downloads once, checksum verified, to
+`/var/lib/libvirt/images/molecule`; each VM gets a throwaway disk on top of it. VM names include the
+scenario, so the three scenarios can also run side by side if the machine has the memory.
 
 ## Related roles
 

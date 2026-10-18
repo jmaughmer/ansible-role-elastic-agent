@@ -20,7 +20,9 @@
           - ansible_facts.services['elastic-agent.service'].status == 'enabled'
 
     - name: Read the installed version
-      ansible.builtin.command: rpm -q --queryformat '%{VERSION}' elastic-agent  # noqa: command-instead-of-module - reads one package's version
+      ansible.builtin.command: >-  # noqa: command-instead-of-module - reads one package's version
+        {{ "dpkg-query -W -f='${Version}' elastic-agent" if ansible_facts['os_family'] == 'Debian'
+           else "rpm -q --queryformat '%{VERSION}' elastic-agent" }}
       register: test_rpm
       changed_when: false
 
@@ -35,12 +37,22 @@
       ansible.builtin.slurp:
         src: /etc/yum.repos.d/elastic-agent.repo
       register: test_repo
+      when: ansible_facts['os_family'] == 'RedHat'
 
     - name: Check the repository is the shared, disabled one
       ansible.builtin.assert:
         that:
           - test_repo.content | b64decode is search('\[elastic-agent-9\.x\]')
           - test_repo.content | b64decode is search('enabled = 0')
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    # Held so a routine `apt upgrade` cannot upgrade Elastic Agent
+    - name: Check the package is held
+      ansible.builtin.command: dpkg-query -W -f='${Status}' elastic-agent
+      register: test_hold
+      changed_when: false
+      failed_when: test_hold.stdout is not match('hold ok installed')
+      when: ansible_facts['os_family'] == 'Debian'
 
     - name: Check ownership and permissions
       ansible.builtin.stat:

@@ -1,7 +1,8 @@
 ---
 # The repository and package tasks are ansible-role-elastic-fleet's, so both
-# roles write the same repository file (disabled, enabled only for the roles'
-# own dnf tasks) and handle Satellite the same way. Its settings are mapped
+# roles write the same repository file (on Enterprise Linux disabled, enabled
+# only for the roles' own dnf tasks; on Ubuntu an apt source with the package
+# held) and handle Satellite the same way. Its settings are mapped
 # from this role's. install.yml installs the package when it is missing and
 # upgrades it in place when elastic_agent_version changes, after checking the
 # package source has that version.
@@ -44,8 +45,8 @@
 
 - name: Package | Query the Elastic Agent version now installed  # noqa: command-instead-of-module
   ansible.builtin.command:
-    cmd: rpm -q --queryformat '%{VERSION}' elastic-agent
-  register: _ea_rpm_after
+    cmd: "{{ _ea_pkg_version_cmd }}"
+  register: _ea_pkg_after
   changed_when: false
   failed_when: false
   check_mode: false
@@ -56,4 +57,6 @@
     _ea_restart_required: true
   when:
     - _ea_installed_version | length > 0
-    - (_ea_rpm_after.stdout | trim) != _ea_installed_version
+    - >-
+      ((_ea_pkg_after.stdout | trim) if ansible_facts['os_family'] != 'Debian'
+       else (_ea_pkg_after.stdout.split() | last | default(''))) != _ea_installed_version
