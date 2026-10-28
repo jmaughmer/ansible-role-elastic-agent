@@ -15,18 +15,18 @@ test_fleet_address: "{{ hostvars[groups['fleet_server'] | first].ansible_facts.d
 test_kibana_url: "https://{{ test_kibana_address }}:5601"
 
 # Written on the controller by prepare.yml: service tokens and the enrollment
-# token of the policy agent-2 uses.
+# token of the policy the token agent uses.
 test_secrets_dir: "{{ lookup('env', 'MOLECULE_EPHEMERAL_DIRECTORY') }}/secrets"
 
 # Superuser in Elasticsearch's file realm, also used for Kibana.
 test_admin_user: molecule_admin
 test_admin_password: molecule-admin-password
 
-# Agent policies prepare.yml creates: agent-1 looks its token up in Kibana,
-# agent-2 gets it the way ansible-role-elastic-fleet publishes it.
+# Agent policies prepare.yml creates: the mTLS agent looks its token up in
+# Kibana, the token agent gets it the way ansible-role-elastic-fleet publishes it.
 test_policies: [molecule-a, molecule-b]
 
-# ansible-role-elastic-tls: a private CA on es-1 (the first elasticsearch host).
+# ansible-role-elastic-tls: a private CA on the first elasticsearch host.
 elastic_tls_provider: ca
 elastic_tls_ca_common_name: Molecule Test CA
 elastic_tls_ca_passphrase: molecule-test-passphrase

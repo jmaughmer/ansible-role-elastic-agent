@@ -1,0 +1,19 @@
+# The official ubuntu image with systemd as PID 1 and Python for Ansible. The
+# apt lists stay, as on a real host, so package tasks need no cache update.
+FROM {{ item.image }}
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      systemd systemd-sysv python3 python3-apt ca-certificates iproute2 \
+ && apt-get clean
+
+# Ubuntu's systemd gives each service 15% of the container's pids limit,
+# which Podman sets to 2048: 307 tasks, too few for Elasticsearch's threads.
+# Enterprise Linux's systemd gives 80%.
+RUN mkdir -p /etc/systemd/system.conf.d \
+ && printf '%s\n' '[Manager]' 'DefaultTasksMax=80%' \
+      > /etc/systemd/system.conf.d/tasks-max.conf
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

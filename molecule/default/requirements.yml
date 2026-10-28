@@ -17,4 +17,3 @@ collections:
   - name: community.general   # ansible-role-elastic-fleet's ufw tasks
   - name: community.crypto    # ansible-role-elastic-tls
   - name: containers.podman   # Molecule's podman driver
-  - name: community.docker    # Molecule's docker driver (docker scenario)

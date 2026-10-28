@@ -73,7 +73,7 @@
       loop_control:
         label: "{{ item.path }}"
 
-    # agent-1's comes from its elastic_tls entry, agent-2's from
+    # The mTLS agent's comes from its elastic_tls entry, the token agent's from
     # elastic_tls_ca_certificate; both are the test CA.
     - name: Read the installed Fleet Server CA and the elastic_tls CA
       ansible.builtin.slurp:
@@ -104,9 +104,11 @@
   hosts: kibana
   gather_facts: false
   vars:
-    test_expected:
-      agent-1: {policy: molecule-a, tags: [molecule, mtls]}
-      agent-2: {policy: molecule-b, tags: [molecule, re-enrolled]}   # side_effect.yml
+    # By group, so the scenarios can name their hosts; the token agent's tags
+    # are the ones side_effect.yml gave it.
+    test_expected: >-
+      {{ {groups['test_agent_mtls'][0]: {'policy': 'molecule-a', 'tags': ['molecule', 'mtls']},
+          groups['test_agent_token'][0]: {'policy': 'molecule-b', 'tags': ['molecule', 're-enrolled']}} }}
     # The id each agent reports, read by the play above. Fleet keeps listing
     # the enrollment side_effect.yml replaced as online until its last
     # check-in times out, so agents are matched by id rather than by hostname.

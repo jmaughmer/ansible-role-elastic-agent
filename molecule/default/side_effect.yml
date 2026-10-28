@@ -1,9 +1,10 @@
 ---
-# Changes that need a new enrollment, on agent-2 only:
+# Changes that need a new enrollment, on the token agent (group
+# test_agent_token) only:
 #   - an explicit elastic_agent_enrollment_token, and new tags. The token alone
 #     would not re-enroll; the tags do.
-# The agent must come back under a new id, with the new tags, while agent-1 is
-# left alone.
+# The agent must come back under a new id, with the new tags, while the mTLS
+# agent (group test_agent_mtls) is left alone.
 - name: Gather facts from every host
   hosts: all
   gather_facts: true
@@ -18,8 +19,8 @@
       register: test_status_before
       changed_when: false
 
-- name: Re-enroll agent-2 with an explicit token and new tags
-  hosts: agent-2
+- name: Re-enroll the token agent with an explicit token and new tags
+  hosts: test_agent_token
   gather_facts: false
   vars:
     elastic_agent_enrollment_token: "{{ lookup('ansible.builtin.file', test_secrets_dir ~ '/molecule_b_enrollment_token') }}"
@@ -42,11 +43,11 @@
       register: test_status_after
       changed_when: false
 
-    - name: Check only agent-2 has a new id
+    - name: Check only the token agent has a new id
       vars:
         test_before: "{{ (test_status_before.stdout | from_json).info.id }}"
         test_after: "{{ (test_status_after.stdout | from_json).info.id }}"
       ansible.builtin.assert:
         that:
-          - (test_before != test_after) == (inventory_hostname == 'agent-2')
+          - (test_before != test_after) == ('test_agent_token' in group_names)
         fail_msg: "{{ inventory_hostname }}: agent id {{ test_before }} -> {{ test_after }}"

@@ -1,16 +1,20 @@
 ---
 # Five systemd containers (rootless Podman is fine) on one network:
-#   es-1               Elasticsearch, single node, installed by prepare.yml;
-#                      also the CA host of ansible-role-elastic-tls
-#   kb-1               Kibana, installed by prepare.yml
-#   fleet-1            Fleet Server, deployed by ansible-role-elastic-fleet
-#                      in prepare.yml
-#   agent-1, agent-2   the inventory group "elastic_agent", which the role is
-#                      applied to
-# MOLECULE_DISTRO picks the EL release (default rockylinux9; also
-# rockylinux10). Certificates come from ansible-role-elastic-tls everywhere,
-# as in a real deployment. Ansible connects as root, so the playbooks do not
-# use become: sudo fails under PAM in rootless Podman containers.
+#   agent-default-es      Elasticsearch, single node, installed by prepare.yml;
+#                         also the CA host of ansible-role-elastic-tls
+#   agent-default-kb      Kibana, installed by prepare.yml
+#   agent-default-fleet   Fleet Server, deployed by ansible-role-elastic-fleet
+#                         in prepare.yml
+#   agent-default-agent1  the inventory group "elastic_agent", which the role
+#   agent-default-agent2  is applied to; agent1 is also in test_agent_mtls,
+#                         agent2 in test_agent_token
+# The playbooks and inventory find the hosts by group, and every scenario
+# names its hosts and network after itself, so scenarios can run at the same
+# time.
+# MOLECULE_EL picks the AlmaLinux release of the almalinux/<release>-init
+# image (default 9; also 10). Certificates come from ansible-role-elastic-tls
+# everywhere, as in a real deployment. Ansible connects as root, so the
+# playbooks do not use become: the images have no sudo.
 role_name_check: 1
 
 dependency:
@@ -20,52 +24,51 @@ driver:
   name: podman
 
 platforms:
-  - name: es-1
-    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+  - name: agent-default-es
+    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
     pre_build_image: true
     override_command: false   # keep the image's own CMD: systemd as PID 1
     systemd: always
-    network: elastic_agent_molecule  # created by the driver from the first platform
+    network: elastic_agent_default  # created by the driver from the first platform
     groups: [elasticsearch]
 
-  - name: kb-1
-    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+  - name: agent-default-kb
+    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
     pre_build_image: true
     override_command: false
     systemd: always
-    network: elastic_agent_molecule
+    network: elastic_agent_default
     groups: [kibana]
 
-  - name: fleet-1
-    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+  - name: agent-default-fleet
+    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
     pre_build_image: true
     override_command: false
     systemd: always
-    network: elastic_agent_molecule
+    network: elastic_agent_default
     groups: [fleet_server]
 
-  - name: agent-1
-    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+  - name: agent-default-agent1
+    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
     pre_build_image: true
     override_command: false
     systemd: always
-    network: elastic_agent_molecule
-    groups: [elastic_agent]
+    network: elastic_agent_default
+    groups: [elastic_agent, test_agent_mtls]
 
-  - name: agent-2
-    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+  - name: agent-default-agent2
+    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
     pre_build_image: true
     override_command: false
     systemd: always
-    network: elastic_agent_molecule
-    groups: [elastic_agent]
+    network: elastic_agent_default
+    groups: [elastic_agent, test_agent_token]
 
 provisioner:
   name: ansible
   inventory:
     links:
       group_vars: inventory/group_vars/
-      host_vars: inventory/host_vars/
 
 verifier:
   name: ansible

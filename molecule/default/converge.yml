@@ -10,7 +10,7 @@
 
 # Stands in for ansible-role-elastic-fleet, which publishes one enrollment
 # token per agent policy on the Fleet Server hosts when it runs earlier in the
-# same run. agent-2 takes its token from here.
+# same run. The token agent takes its token from here.
 - name: Publish an enrollment token the way ansible-role-elastic-fleet does
   hosts: fleet_server
   gather_facts: false

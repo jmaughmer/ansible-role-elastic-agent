@@ -4,11 +4,11 @@
 #   - every host gets iproute (without it there are no network facts) and
 #     openssl (the roles check keys and certificates with it);
 #   - ansible-role-elastic-tls issues every host's certificate from a private CA
-#     on es-1 (agent-2 only gets the CA);
+#     on the elasticsearch host (the token agent only gets the CA);
 #   - Elasticsearch runs as a single node with TLS on HTTP and a file-realm
 #     superuser, and issues service tokens for Kibana and Fleet Server;
 #   - Kibana runs with TLS, connected to it;
-#   - ansible-role-elastic-fleet deploys Fleet Server on fleet-1;
+#   - ansible-role-elastic-fleet deploys Fleet Server on the fleet_server host;
 #   - the agent policies in test_policies are created, and the enrollment
 #     token of molecule-b is kept for converge.yml.
 - name: Install what the roles and the tests need

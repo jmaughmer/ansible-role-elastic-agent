@@ -42,8 +42,8 @@
     test_case:
       name: distribution not in elastic_agent_supported_distributions
       task: Verify operating system is supported
-      expect: Unsupported platform Rocky
-    elastic_agent_supported_distributions: [RedHat, AlmaLinux]
+      expect: Unsupported platform AlmaLinux
+    elastic_agent_supported_distributions: [RedHat, Rocky]
 
 - name: Host in the Fleet Server group
   ansible.builtin.import_playbook: case.yml
@@ -96,7 +96,7 @@
     test_case:
       name: satellite without a repository id
       task: Verify package source settings
-      expect: Satellite needs elastic_agent_satellite_repo_id
+      expect: needs elastic_agent_satellite_repo_id
     elastic_agent_repo_source: satellite
 
 - name: Satellite override of baseurl
@@ -170,7 +170,7 @@
     test_case:
       name: client certificate without an ssl_certificates entry
       task: Verify the client certificate
-      expect: needs the entry 'agent-p1'
+      expect: needs the entry 'agent-preflight-agent'
     elastic_agent_client_certificate: true
 
 - name: No token and no Kibana credentials

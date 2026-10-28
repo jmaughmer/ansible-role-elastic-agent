@@ -233,41 +233,33 @@ Useful tags: `elastic_agent_install`, `elastic_agent_tls`, `elastic_agent_enroll
 
 ## Testing
 
-[`molecule/default/`](molecule/default/) builds the whole chain in five systemd containers: `es-1` (Elasticsearch, single node), `kb-1` (Kibana), `fleet-1` (Fleet Server, deployed by ansible-role-elastic-fleet) and two agents, with every certificate from ansible-role-elastic-tls. [`prepare.yml`](molecule/default/prepare.yml) creates two agent policies. `agent-1` looks its token up in Kibana and presents a client certificate; `agent-2` has only the CA and takes its token the way ansible-role-elastic-fleet publishes it. The sequence is:
+[`molecule/default/`](molecule/default/) builds the whole chain in five systemd containers: `agent-default-es` (Elasticsearch, single node), `agent-default-kb` (Kibana), `agent-default-fleet` (Fleet Server, deployed by ansible-role-elastic-fleet) and two agents, with every certificate from ansible-role-elastic-tls. [`prepare.yml`](molecule/default/prepare.yml) creates two agent policies. `agent-default-agent1` (group `test_agent_mtls`) looks its token up in Kibana and presents a client certificate; `agent-default-agent2` (group `test_agent_token`) has only the CA and takes its token the way ansible-role-elastic-fleet publishes it. The playbooks find the hosts by group, and each scenario names its containers and network after itself, so different scenarios, in this role or the others, can run at the same time. One scenario runs once at a time: Molecule keeps a single state per scenario, so run `MOLECULE_EL=9` and `MOLECULE_EL=10` one after the other. The sequence is:
 
 1. **converge**, **idempotence** and **check** (check mode on the enrolled hosts);
-2. **side effect** ([`side_effect.yml`](molecule/default/side_effect.yml)): `agent-2` gets an explicit token and new tags, and must come back under a new id while `agent-1` keeps its own;
+2. **side effect** ([`side_effect.yml`](molecule/default/side_effect.yml)): the token agent gets an explicit token and new tags, and must come back under a new id while the mTLS agent keeps its own;
 3. **verify** ([`verify.yml`](molecule/default/verify.yml)): the service, version, shared repository file, file modes, the CA, `elastic-agent status`, and, in Fleet, each agent online once, in its policy, with its tags.
 
-[`molecule/preflight/`](molecule/preflight/) runs the checks against settings that must be refused (and some that must pass), checking each fails in the right task without printing a secret. [`molecule/docker/`](molecule/docker/) is the default scenario on Docker.
+[`molecule/preflight/`](molecule/preflight/) runs the checks against settings that must be refused (and some that must pass), checking each fails in the right task without printing a secret.
 
 ```bash
 pip install -r molecule/requirements.txt
-molecule test                                 # Rocky Linux 9
-MOLECULE_DISTRO=rockylinux10 molecule test
+molecule test                                 # AlmaLinux 9
+MOLECULE_EL=10 molecule test                  # AlmaLinux 10
 molecule test -s preflight
 ```
 
-### On KVM virtual machines
+The hosts are `docker.io/almalinux/<release>-init` containers under rootless Podman, so the tests run on any Linux host with systemd and Podman, such as an AlmaLinux 10 WSL 2 distribution with `systemd=true` in `/etc/wsl.conf`; no KVM is needed.
 
-[`molecule/kvm/`](molecule/kvm/) runs the default scenario on real AlmaLinux 10 virtual machines
-instead of containers: the same hosts, groups, playbooks and inventory, one VM per host, on local
-KVM/libvirt (`qemu:///system`). Each VM has its own kernel, so SELinux is enforcing and settings such
-as `vm.max_map_count` are the VM's own. Overrides for the VMs go in
-`molecule/kvm/inventory/group_vars/<group>/kvm.yml`.
+### On Ubuntu
 
-[`molecule/kvm-ubuntu2404/`](molecule/kvm-ubuntu2404/) and
-[`molecule/kvm-ubuntu2604/`](molecule/kvm-ubuntu2604/) run the same thing on Ubuntu 24.04 and 26.04
-VMs. They only swap the cloud image, and share `molecule/kvm/`'s playbooks and inventory.
+[`molecule/ubuntu/`](molecule/ubuntu/) runs the default scenario on Ubuntu containers: the same groups, playbooks and inventory, with hosts of its own (`agent-ubuntu-*`), from the official `ubuntu` image with systemd and Python added ([`Dockerfile.j2`](molecule/ubuntu/Dockerfile.j2)). `MOLECULE_UBUNTU` picks the release (default `24.04`; also `26.04`). It can run alongside the default scenario.
 
 ```bash
-for s in kvm kvm-ubuntu2404 kvm-ubuntu2604; do molecule test -s "$s" || break; done
+molecule test -s ubuntu
+MOLECULE_UBUNTU=26.04 molecule test -s ubuntu
 ```
 
-The machine running Molecule needs libvirt, `virt-install`, `qemu-img` and `xorriso`, and its user
-must be able to manage `qemu:///system`. Each cloud image downloads once, checksum verified, to
-`/var/lib/libvirt/images/molecule`; each VM gets a throwaway disk on top of it. VM names include the
-scenario, so the three scenarios can also run side by side if the machine has the memory.
+Not covered by containers: SELinux enforcing. The containers share the host's kernel, and WSL's does not enforce SELinux.
 
 ## Related roles
 

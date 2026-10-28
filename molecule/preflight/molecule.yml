@@ -19,8 +19,8 @@ driver:
   name: podman
 
 platforms:
-  - name: agent-p1
-    image: "docker.io/geerlingguy/docker-${MOLECULE_DISTRO:-rockylinux9}-ansible:latest"
+  - name: agent-preflight-agent
+    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
     pre_build_image: true
     override_command: false
     systemd: always
