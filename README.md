@@ -180,7 +180,7 @@ The repository and package tasks are ansible-role-elastic-fleet's `tasks/reposit
 ## Hardened hosts
 
 - **FIPS.** An encrypted client key in the traditional PEM format (`Proc-Type: 4,ENCRYPTED`) cannot be read in FIPS mode; preflight refuses it. Elastic ships separate FIPS builds of Elastic Agent; install that package through `elastic_agent_repo_source: none` or a Satellite repository.
-- **fapolicyd.** Elastic Agent runs binaries from `/var/lib/elastic-agent/data/`, which a default fapolicyd policy blocks. Trust that directory before enrolling.
+- **fapolicyd.** Nothing to do with the default rules. The package installs Elastic Agent and its components under `/var/lib/elastic-agent/data/`, where the rpm trust covers them, and the agent runs as root; tested with 9.5.4 and fapolicyd enforcing on AlmaLinux 10.
 - **SELinux.** Elastic Agent runs unconfined from its packaged unit; nothing needs labelling.
 
 ## Notes and caveats
