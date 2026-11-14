@@ -1,6 +1,10 @@
 ---
-# Builds the stack the agents enroll into. Runs once, after the containers are
+# Builds the stack the agents enroll into. Runs once, after the VMs are
 # created:
+#   - play 0 gets the boxes ansible-ready: the lab templates self-configure
+#     labnet DNS since 2026-11-13, but the resolv.conf task cures a DHCP
+#     hiccup and the dnf priming keeps a boot-time DNS stall from killing
+#     the first metadata fetch;
 #   - every host gets iproute (without it there are no network facts) and
 #     openssl (the roles check keys and certificates with it);
 #   - ansible-role-elastic-tls issues every host's certificate from a private CA
@@ -11,6 +15,39 @@
 #   - ansible-role-elastic-fleet deploys Fleet Server on the fleet_server host;
 #   - the agent policies in test_policies are created, and the enrollment
 #     token of molecule-b is kept for converge.yml.
+# Privilege comes from the scenario's group_vars (ansible_become), because the
+# driver's SSH lands as a sudo user.
+- name: Get the VMs ready for ansible-core
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH to be up after first boot
+      ansible.builtin.wait_for_connection:
+
+    # The AlmaLinux cloud templates were first booted on the LAN, so they can
+    # carry a stale /etc/resolv.conf that EL9's cloud images never update
+    # (NM dns=none; cloud-init owns the file). Rewrite it from the lease.
+    - name: Point resolv.conf at the labnet DNS from DHCP
+      ansible.builtin.raw: |
+        gw=$(ip -4 route | awk '/default via/ {print $3; exit}')
+        test -n "$gw"
+        dns=""
+        for d in $(nmcli -t -f IP4.DNS device show eth0 | cut -d: -f2); do
+          [ "$d" = "$gw" ] && dns=$d
+        done
+        printf 'nameserver %s\n' "${dns:-$gw}" > /etc/resolv.conf
+      changed_when: true
+
+    # Labnet DNS can hiccup while several VMs boot at once, which used to
+    # kill a first dnf call (Curl error 6). Prime name and metadata here with
+    # bounded retries; the dnf below then finds fresh metadata.
+    - name: Prime DNS and dnf metadata
+      ansible.builtin.raw: >-
+        /bin/sh -c "for i in 1 2 3 4 5; do
+        if getent hosts mirrors.almalinux.org && dnf -y -q makecache;
+        then exit 0; fi; sleep 10; done; exit 1"
+      changed_when: false
+
 - name: Install what the roles and the tests need
   hosts: all
   gather_facts: false

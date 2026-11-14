@@ -1,5 +1,8 @@
 ---
-# Five systemd containers (rootless Podman is fine) on one network:
+# Tests run on the Proxmox test lab: five real KVM VMs cloned from the lab
+# fleet onto the isolated labnet network — SELinux enforcing and firewalld
+# running, the paths containers could never exercise. The chain mirrors a
+# real deployment:
 #   agent-default-es      Elasticsearch, single node, installed by prepare.yml;
 #                         also the CA host of ansible-role-elastic-tls
 #   agent-default-kb      Kibana, installed by prepare.yml
@@ -8,64 +11,80 @@
 #   agent-default-agent1  the inventory group "elastic_agent", which the role
 #   agent-default-agent2  is applied to; agent1 is also in test_agent_mtls,
 #                         agent2 in test_agent_token
-# The playbooks and inventory find the hosts by group, and every scenario
-# names its hosts and network after itself, so scenarios can run at the same
-# time.
-# MOLECULE_EL picks the AlmaLinux release of the almalinux/<release>-init
-# image (default 9; also 10). Certificates come from ansible-role-elastic-tls
-# everywhere, as in a real deployment. Ansible connects as root, so the
-# playbooks do not use become: the images have no sudo.
+# The playbooks and inventory find the hosts by group. The driver connects as
+# a sudo user, so inventory/group_vars/all.yml sets ansible_become and every
+# task runs privileged through it.
+#
+# All Proxmox connection details live in the driver's secrets file on the
+# control machine, not here. Default VMIDs are the repo's 9280-9284 band, via
+# LAB_VMID_0..4 so the lab's `mlab` runner can claim a free band per run and
+# allow parallel runs of this repo; a plain molecule test uses the pinned
+# band, one lab run of this repo at a time. Needs the memory/cores
+# passthrough patch in the molecule-proxmox driver (ct-bootstrap.sh
+# re-applies it after pipx upgrades).
+#
+# Run on the lab's molecule control machine:
+#   /root/labnet/mlab test -s default              # parallel-safe, recommended
+#   molecule test                                  # pinned band
+#   LAB_TEMPLATE=template-alma10 molecule test     # the other EL release
 role_name_check: 1
 
 dependency:
-  name: galaxy   # installs requirements.yml next to this file
+  name: galaxy
+  enabled: false        # roles and collections preinstalled on the control machine
+prerun: false
 
 driver:
-  name: podman
+  name: molecule-proxmox
+  options:
+    proxmox_secrets: ${LAB_PROXMOX_SECRETS:-/root/.config/molecule/proxmox-secrets.yml}
+    node: ${LAB_NODE:-galactica}
+    validate_certs: false   # the lab's PVE uses its self-signed cert
+    ssh_user: labadmin
+    ssh_identity_file: /root/.ssh/id_ed25519
+    full: true
+    pool: testlab
+    timeout: 300
 
 platforms:
   - name: agent-default-es
-    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
-    pre_build_image: true
-    override_command: false   # keep the image's own CMD: systemd as PID 1
-    systemd: always
-    network: elastic_agent_default  # created by the driver from the first platform
+    template_name: ${LAB_TEMPLATE:-template-alma9}
+    newid: ${LAB_VMID_0:-9280}
     groups: [elasticsearch]
+    memory: 6144          # Elasticsearch heap plus page cache (driver patch)
+    cores: 2
 
   - name: agent-default-kb
-    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: always
-    network: elastic_agent_default
+    template_name: ${LAB_TEMPLATE:-template-alma9}
+    newid: ${LAB_VMID_1:-9281}
     groups: [kibana]
+    memory: 4096
+    cores: 2
 
   - name: agent-default-fleet
-    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: always
-    network: elastic_agent_default
+    template_name: ${LAB_TEMPLATE:-template-alma9}
+    newid: ${LAB_VMID_2:-9282}
     groups: [fleet_server]
+    memory: 3072
 
   - name: agent-default-agent1
-    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: always
-    network: elastic_agent_default
+    template_name: ${LAB_TEMPLATE:-template-alma9}
+    newid: ${LAB_VMID_3:-9283}
     groups: [elastic_agent, test_agent_mtls]
+    memory: 2048
 
   - name: agent-default-agent2
-    image: "docker.io/almalinux/${MOLECULE_EL:-9}-init:latest"
-    pre_build_image: true
-    override_command: false
-    systemd: always
-    network: elastic_agent_default
+    template_name: ${LAB_TEMPLATE:-template-alma9}
+    newid: ${LAB_VMID_4:-9284}
     groups: [elastic_agent, test_agent_token]
+    memory: 2048
 
 provisioner:
   name: ansible
+  env:
+    # elastic_tls and elastic_fleet resolve here: sibling role checkouts of
+    # this repo (prepare.yml includes them by name).
+    ANSIBLE_ROLES_PATH: "${MOLECULE_PROJECT_DIRECTORY}/..:/root/.ansible/roles"
   inventory:
     links:
       group_vars: inventory/group_vars/
@@ -75,7 +94,6 @@ verifier:
 
 scenario:
   test_sequence:
-    - dependency
     - destroy
     - syntax
     - create

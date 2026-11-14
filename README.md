@@ -233,33 +233,50 @@ Useful tags: `elastic_agent_install`, `elastic_agent_tls`, `elastic_agent_enroll
 
 ## Testing
 
-[`molecule/default/`](molecule/default/) builds the whole chain in five systemd containers: `agent-default-es` (Elasticsearch, single node), `agent-default-kb` (Kibana), `agent-default-fleet` (Fleet Server, deployed by ansible-role-elastic-fleet) and two agents, with every certificate from ansible-role-elastic-tls. [`prepare.yml`](molecule/default/prepare.yml) creates two agent policies. `agent-default-agent1` (group `test_agent_mtls`) looks its token up in Kibana and presents a client certificate; `agent-default-agent2` (group `test_agent_token`) has only the CA and takes its token the way ansible-role-elastic-fleet publishes it. The playbooks find the hosts by group, and each scenario names its containers and network after itself, so different scenarios, in this role or the others, can run at the same time. One scenario runs once at a time: Molecule keeps a single state per scenario, so run `MOLECULE_EL=9` and `MOLECULE_EL=10` one after the other. The sequence is:
+[`molecule/default/`](molecule/default/) builds the whole chain on five real KVM VMs cloned
+from the Proxmox test lab's fleet onto its isolated labnet network — SELinux enforcing,
+firewalld running, the paths containers never could: `agent-default-es` (Elasticsearch,
+single node), `agent-default-kb` (Kibana), `agent-default-fleet` (Fleet Server, deployed by
+ansible-role-elastic-fleet) and two agents, with every certificate from
+ansible-role-elastic-tls. [`prepare.yml`](molecule/default/prepare.yml) gets the VMs onto the
+labnet resolver, then creates two agent policies. `agent-default-agent1` (group
+`test_agent_mtls`) looks its token up in Kibana and presents a client certificate;
+`agent-default-agent2` (group `test_agent_token`) has only the CA and takes its token the way
+ansible-role-elastic-fleet publishes it. The playbooks find the hosts by group, and hosts are
+addressed by their labnet address (labnet DNS does not resolve bare VM names). The sequence is:
 
 1. **converge**, **idempotence** and **check** (check mode on the enrolled hosts);
 2. **side effect** ([`side_effect.yml`](molecule/default/side_effect.yml)): the token agent gets an explicit token and new tags, and must come back under a new id while the mTLS agent keeps its own;
 3. **verify** ([`verify.yml`](molecule/default/verify.yml)): the service, version, shared repository file, file modes, the CA, `elastic-agent status`, and, in Fleet, each agent online once, in its policy, with its tags.
 
-[`molecule/preflight/`](molecule/preflight/) runs the checks against settings that must be refused (and some that must pass), checking each fails in the right task without printing a secret.
+Tests run on the lab's molecule control machine: `molecule`, `molecule-proxmox` and the role's
+collections are preinstalled there, as are the `elastic_tls` and `elastic_fleet` role checkouts
+the fixture chain needs; the driver's connection secrets and SSH key live only in the control
+machine's own config files. Nothing lab-specific is in this repo beyond the fleet template name
+and the default VMID band (9280–9284); hosts, tokens and subnets never leave the control
+machine. The Test Lab project's `molecule-labnet/` directory documents the lab itself.
 
 ```bash
-pip install -r molecule/requirements.txt
-molecule test                                 # AlmaLinux 9
-MOLECULE_EL=10 molecule test                  # AlmaLinux 10
-molecule test -s preflight
+molecule test                                   # AlmaLinux 9, SELinux enforcing
+LAB_TEMPLATE=template-alma10 molecule test      # the other EL release
 ```
 
-The hosts are `docker.io/almalinux/<release>-init` containers under rootless Podman, so the tests run on any Linux host with systemd and Podman, such as an AlmaLinux 10 WSL 2 distribution with `systemd=true` in `/etc/wsl.conf`; no KVM is needed.
-
-### On Ubuntu
-
-[`molecule/ubuntu/`](molecule/ubuntu/) runs the default scenario on Ubuntu containers: the same groups, playbooks and inventory, with hosts of its own (`agent-ubuntu-*`), from the official `ubuntu` image with systemd and Python added ([`Dockerfile.j2`](molecule/ubuntu/Dockerfile.j2)). `MOLECULE_UBUNTU` picks the release (default `24.04`; also `26.04`). It can run alongside the default scenario.
+The VMIDs come from `LAB_VMID_0..4` and default to the pinned 9280–9284 band, so a plain
+`molecule test` means one lab run of this repo at a time. For several runs of this repo at
+once, use the lab's `mlab` wrapper, which claims a free VMID band (and an isolated ephemeral
+directory) per run:
 
 ```bash
-molecule test -s ubuntu
-MOLECULE_UBUNTU=26.04 molecule test -s ubuntu
+/root/labnet/mlab test -s default               # parallel-safe run on the control machine
 ```
 
-Not covered by containers: SELinux enforcing. The containers share the host's kernel, and WSL's does not enforce SELinux.
+Lint with `yamllint .` and `ansible-lint` (configured by [`.yamllint`](.yamllint) and
+[`.ansible-lint`](.ansible-lint)). There is no CI; run the lint and Molecule from the control
+machine.
+
+Not covered by the scenario: the preflight refusals (the removed `preflight` container
+scenario) and the Ubuntu guest path (the removed `ubuntu` scenario — the Fleet Server and
+agent do ship for Ubuntu, but the tests now run EL guests only).
 
 ## Related roles
 

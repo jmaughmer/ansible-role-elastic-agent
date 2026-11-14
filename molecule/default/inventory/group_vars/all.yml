@@ -1,14 +1,18 @@
 ---
 # Shared by every host and playbook of the scenario.
 
+# The molecule-proxmox driver's SSH lands as a sudo user; the plays need no
+# become of their own because every task runs privileged through it.
+ansible_become: true
+
 test_role_dir: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}"
 # The role's own elastic_agent_version. The whole stack is installed at that
 # version and verify.yml expects the agents to end up at it.
 test_default_version: "{{ (lookup('ansible.builtin.file', test_role_dir ~ '/defaults/main.yml') | from_yaml).elastic_agent_version }}"
 
-# By address rather than by name: the containers are not guaranteed to resolve
-# each other's names. ansible-role-elastic-tls puts each host's address in its
-# certificate.
+# By address rather than by name: labnet DNS does not resolve bare VM
+# hostnames (only the gateway and IPAM-configured names).
+# ansible-role-elastic-tls puts each host's address in its certificate.
 test_es_address: "{{ hostvars[groups['elasticsearch'] | first].ansible_facts.default_ipv4.address }}"
 test_kibana_address: "{{ hostvars[groups['kibana'] | first].ansible_facts.default_ipv4.address }}"
 test_fleet_address: "{{ hostvars[groups['fleet_server'] | first].ansible_facts.default_ipv4.address }}"
