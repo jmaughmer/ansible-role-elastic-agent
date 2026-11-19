@@ -6,4 +6,4 @@
 # value), created with:
 #   POST /_security/api_key  {"name": "ansible-elastic-agent"}
 # using a user with the Fleet "All" Kibana privilege.
-vault_elastic_agent_kibana_api_key: "CHANGE-ME-encoded-api-key"
+vault_elastic_agent_kibana_api_key: REPLACE-WITH-THE-ENCODED-API-KEY
